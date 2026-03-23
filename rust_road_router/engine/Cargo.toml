@@ -1,0 +1,39 @@
+[package]
+name = "rust_road_router"
+version = "0.1.0"
+authors = ["Tim 'tim3z' Zeitz <mail@tim3z.net>"]
+edition = "2021"
+build = "build.rs"
+
+[features]
+default = ["tdcch-approx", "tdcch-precustomization", "tdcch-postcustomization", "tdcch-triangle-sorting", "tdcch-query-astar", "tdcch-query-lazy"]
+tdcch-disable-par = ["cch-disable-par"]
+cch-disable-par = []
+tdcch-query-detailed-timing = []
+tdcch-stall-on-demand = []
+tdcch-approx = []
+tdcch-approx-imai-iri = []
+tdcch-precustomization = []
+tdcch-postcustomization = []
+tdcch-triangle-sorting = []
+tdcch-query-lazy = []
+tdcch-query-corridor = []
+tdcch-query-astar = ["tdcch-query-corridor"]
+tdcch-profiles-with-holes = []
+tdcch-profiles-iterative-reconstruction = ["tdcch-profiles-with-holes"]
+tdcch-prevent-colinear = []
+report-to-stderr = []
+report-allow-override = []
+detailed-stats = []
+
+[dependencies]
+rand = "^0.8.4"
+serde = "^1.0.64"
+serde_json = "^1.0.64"
+rayon = "^1.5.1"
+affinity = "^0.1.2"
+scoped-tls = "^1.0.0"
+chrono = "^0.4.19"
+
+[build-dependencies]
+built = { version = "^0.5.1", features = ["git2", "chrono"] }

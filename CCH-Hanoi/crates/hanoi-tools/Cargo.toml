@@ -1,0 +1,15 @@
+[package]
+name = "hanoi-tools"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+hanoi-core = { path = "../hanoi-core" }
+rust_road_router = { path = "../../../rust_road_router/engine" }
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+[[bin]]
+name = "generate_line_graph"
+path = "src/bin/generate_line_graph.rs"

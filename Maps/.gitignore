@@ -1,0 +1,5 @@
+data/
+*_turns.osm
+*.gpkg
+vietnam-*.osm.pbf
+*.qgz

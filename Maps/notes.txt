@@ -1,0 +1,24 @@
+# Download the boundary as JSON
+wget -O hanoi.poly "https://polygons.openstreetmap.fr/get_poly.py?id=1903516&params=0"
+wget -O hp.poly "https://polygons.openstreetmap.fr/get_poly.py?id=1902682&params=0"
+
+# Extract Hanoi map
+osmium extract --polygon hanoi.poly --set-bounds vietnam-260305.osm.pbf -o hanoi.osm.pbf
+osmium extract --polygon hp.poly --set-bounds vietnam-260305.osm.pbf -o hp.osm.pbf
+
+# Convert to GeoPackage
+ogr2ogr -f GPKG hanoi.gpkg hanoi.osm.pbf
+ogr2ogr -f GPKG hp.gpkg hp.osm.pbf
+
+# View map metadata
+osmium fileinfo -e hanoi.osm.pbf
+osmium fileinfo -e hp.osm.pbf
+
+# Extract turn restrictions
+osmium tags-filter hanoi.osm.pbf r/type=restriction -o hanoi_turns.osm
+osmium tags-filter hp.osm.pbf r/type=restriction -o hp_turns.osm
+
+# Car restrctions filter
+"motorcar" = 'no' or "motor_vehicle" = 'no' or "vehicle" = 'no' or "access" = 'no'
+"motorcycle" = 'no' or "motor_vehicle" = 'no' or "vehicle" = 'no' or "access" = 'no'
+

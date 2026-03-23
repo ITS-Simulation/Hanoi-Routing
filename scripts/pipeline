@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+format_duration() {
+    local total_seconds="$1"
+    local hours=$((total_seconds / 3600))
+    local minutes=$(((total_seconds % 3600) / 60))
+    local seconds=$((total_seconds % 60))
+    local formatted=""
+
+    if [ "$hours" -gt 0 ]; then
+        formatted="${hours}h"
+    fi
+
+    if [ "$minutes" -gt 0 ]; then
+        if [ -n "$formatted" ]; then
+            formatted="${formatted} "
+        fi
+        formatted="${formatted}${minutes}m"
+    fi
+
+    if [ "$seconds" -gt 0 ] || [ -z "$formatted" ]; then
+        if [ -n "$formatted" ]; then
+            formatted="${formatted} "
+        fi
+        formatted="${formatted}${seconds}s"
+    fi
+
+    printf "%s" "$formatted"
+}
+
+on_exit() {
+    local exit_code="$1"
+    local total_runtime=$((SECONDS - TOTAL_START_SECONDS))
+
+    if [ "$exit_code" -eq 0 ]; then
+        echo "Pipeline completed successfully in $(format_duration "$total_runtime")."
+    else
+        echo "Pipeline failed after $(format_duration "$total_runtime")." >&2
+    fi
+}
+
+usage() {
+    echo "Usage: $0 <map_source> <profile>"
+    echo "  map_source: the source of the map (e.g. hanoi.osm.pbf)"
+    echo "  profile: the profile of the graph (e.g. car, motorcycle)"
+    exit 1
+}
+
+if [ $# -ne 2 ]; then
+    usage
+fi
+
+TOTAL_START_SECONDS="$SECONDS"
+trap 'on_exit $?' EXIT
+
+step() {
+    echo -e "\n\e[36m==> Next up: $*\e[0m"
+
+    read -p "Press Enter to continue or [Ctrl+C] to exit..." || exit 1
+
+    "$@"
+}
+
+echo "Starting CCH graph loader & generator pipeline..."
+
+MAP_SOURCE="$1"
+PROFILE="$2"
+
+REPO=~/VTS/Hanoi-Routing
+INPUT_PBF="$REPO/Maps/$MAP_SOURCE"
+MAP_BASENAME="$(basename "$MAP_SOURCE")"
+MAP_NAME="${MAP_BASENAME%.osm.pbf}"
+OUTPUT_DIR="$REPO/Maps/data/${MAP_NAME}_$PROFILE"
+GRAPH_DIR="$OUTPUT_DIR/graph"
+
+CCH_GEN="$REPO/CCH-Generator/lib/cch_generator"
+VALIDATOR="$REPO/CCH-Generator/lib/validate_graph"
+COND_EXTRACT="$REPO/RoutingKit/bin/conditional_turn_extract"
+LINE_GRAPH_GEN="$REPO/CCH-Hanoi/target/release/generate_line_graph"
+
+mkdir -p "$GRAPH_DIR"
+
+# Phase 1: Generate the graph
+"$CCH_GEN" "$INPUT_PBF" "$GRAPH_DIR" --profile "$PROFILE"
+"$VALIDATOR" "$GRAPH_DIR"
+
+# Phase 2: Extract the conditional turns (store at profile root)
+"$COND_EXTRACT" "$INPUT_PBF" "$GRAPH_DIR" "$OUTPUT_DIR" --profile "$PROFILE"
+"$VALIDATOR" "$GRAPH_DIR"
+
+# Phase 3: Generate the line graph
+"$LINE_GRAPH_GEN" "$GRAPH_DIR" "$OUTPUT_DIR/line_graph"
+"$VALIDATOR" "$GRAPH_DIR" --turn-expanded "$OUTPUT_DIR/line_graph"
+
+# Phase 4: Generate the CCH ordering for normal graph
+"$REPO/rust_road_router/flow_cutter_cch_order.sh" "$GRAPH_DIR"
+"$REPO/rust_road_router/flow_cutter_cch_cut_order.sh" "$GRAPH_DIR"
+"$REPO/rust_road_router/flow_cutter_cch_cut_reorder.sh" "$GRAPH_DIR"
+
+# Phase 5: Generate the CCH ordering for line graph
+"$REPO/rust_road_router/flow_cutter_cch_order.sh" "$OUTPUT_DIR/line_graph"
+
+exit 0

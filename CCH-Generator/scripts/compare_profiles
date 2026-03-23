@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  echo "Usage: $0 <output_root_dir> <mode>"
+  echo "  mode: normal | graph | line_graph | line"
+}
+
+if [[ $# -ne 2 ]]; then
+  usage
+  exit 1
+fi
+
+OUTPUT_ROOT="$1"
+MODE="$2"
+
+CAR_DIR="${OUTPUT_ROOT}/hanoi_car"
+MOTORCYCLE_DIR="${OUTPUT_ROOT}/hanoi_motorcycle"
+
+if [[ ! -d "${CAR_DIR}" ]]; then
+  echo "Missing profile directory: ${CAR_DIR}" >&2
+  exit 1
+fi
+
+if [[ ! -d "${MOTORCYCLE_DIR}" ]]; then
+  echo "Missing profile directory: ${MOTORCYCLE_DIR}" >&2
+  exit 1
+fi
+
+case "${MODE}" in
+  normal|graph)
+    MODE="normal"
+    CAR_GRAPH_DIR="${CAR_DIR}/graph"
+    MOTORCYCLE_GRAPH_DIR="${MOTORCYCLE_DIR}/graph"
+    ;;
+  line_graph|line)
+    MODE="line_graph"
+    CAR_GRAPH_DIR="${CAR_DIR}/line_graph"
+    MOTORCYCLE_GRAPH_DIR="${MOTORCYCLE_DIR}/line_graph"
+    ;;
+  *)
+    echo "Invalid mode: ${MODE}" >&2
+    usage
+    exit 1
+    ;;
+esac
+
+for required_dir in "${CAR_GRAPH_DIR}" "${MOTORCYCLE_GRAPH_DIR}"; do
+  if [[ ! -d "${required_dir}" ]]; then
+    echo "Missing graph directory: ${required_dir}" >&2
+    exit 1
+  fi
+done
+
+python3 - "${CAR_DIR}" "${MOTORCYCLE_DIR}" "${CAR_GRAPH_DIR}" "${MOTORCYCLE_GRAPH_DIR}" "${MODE}" <<'PY'
+import array
+import pathlib
+import sys
+
+car_profile_dir = pathlib.Path(sys.argv[1])
+motor_profile_dir = pathlib.Path(sys.argv[2])
+car_graph_dir = pathlib.Path(sys.argv[3])
+motor_graph_dir = pathlib.Path(sys.argv[4])
+mode = sys.argv[5]
+
+def load_u32(path: pathlib.Path) -> array.array:
+    data = array.array("I")
+    with path.open("rb") as f:
+        data.frombytes(f.read())
+    return data
+
+def load_u32_optional(path: pathlib.Path) -> array.array:
+    if not path.exists():
+        return array.array("I")
+    return load_u32(path)
+
+def summarize(profile_dir: pathlib.Path, graph_dir: pathlib.Path, mode: str):
+    first_out = load_u32(graph_dir / "first_out")
+    head = load_u32(graph_dir / "head")
+    travel_time = load_u32(graph_dir / "travel_time")
+
+    node_count = max(len(first_out) - 1, 0)
+    arc_count = len(head)
+    tt_min = min(travel_time) if travel_time else 0
+    tt_max = max(travel_time) if travel_time else 0
+    tt_mean = (sum(travel_time) / len(travel_time)) if travel_time else 0.0
+    summary = {
+        "nodes": node_count,
+        "arcs": arc_count,
+        "tt_min": tt_min,
+        "tt_max": tt_max,
+        "tt_mean": tt_mean,
+    }
+
+    if mode == "normal":
+        forbidden_turn_from_arc = load_u32_optional(graph_dir / "forbidden_turn_from_arc")
+        conditional_turn_from_arc = load_u32_optional(profile_dir / "conditional_turns" / "conditional_turn_from_arc")
+        summary["turns"] = len(forbidden_turn_from_arc)
+        summary["cond_turns"] = len(conditional_turn_from_arc)
+    return summary
+
+car = summarize(car_profile_dir, car_graph_dir, mode)
+motor = summarize(motor_profile_dir, motor_graph_dir, mode)
+
+print("")
+print(f"Profile comparison ({mode})")
+print("-" * (20 + len(mode)))
+print(f"Node count          car={car['nodes']}  motorcycle={motor['nodes']}  delta={motor['nodes'] - car['nodes']}")
+print(f"Arc count           car={car['arcs']}  motorcycle={motor['arcs']}  delta={motor['arcs'] - car['arcs']}")
+if mode == "normal":
+    print(f"Forbidden turns     car={car['turns']}  motorcycle={motor['turns']}  delta={motor['turns'] - car['turns']}")
+    print(f"Conditional turns   car={car['cond_turns']}  motorcycle={motor['cond_turns']}  delta={motor['cond_turns'] - car['cond_turns']}")
+print(f"Travel time min(ms) car={car['tt_min']}  motorcycle={motor['tt_min']}")
+print(f"Travel time max(ms) car={car['tt_max']}  motorcycle={motor['tt_max']}")
+print(f"Travel time mean(ms) car={car['tt_mean']:.2f}  motorcycle={motor['tt_mean']:.2f}")
+PY

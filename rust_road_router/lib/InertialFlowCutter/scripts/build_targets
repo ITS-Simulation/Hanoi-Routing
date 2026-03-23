@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO=~/VTS/Hanoi-Routing
+
+cd $REPO/rust_road_router/lib/InertialFlowCutter
+
+mkdir -p build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGIT_SUBMODULE=OFF -DUSE_KAHIP=OFF
+cmake --build build --target console -j"$(nproc)"
