@@ -1,5 +1,35 @@
 # CHANGELOGS.md
 
+## 2026-03-23 — Live Weight Pipeline Plan
+
+### Summary
+
+Created architecture plan for the live weight pipeline (`docs/planned/Live Weight Pipeline.md`).
+This is the "horizontal T-bar" — ingesting real-time camera speed data into CCH weight vectors.
+
+### Changes
+
+- **`docs/planned/Live Weight Pipeline.md`** (Rev 3): Full plan covering:
+  - Architecture critique of the original camera → worker → Kafka → smooth → model proposal
+  - Tech stack: **Kotlin** (coroutines, fast iteration, JVM stability) in new
+    `Live_Network_Routing` project; Rust was considered but Kotlin fits
+    I/O-bound data pipeline work better
+  - Camera-edge mapping backbone: `CameraMappingSource` interface with JSON
+    config for simulation and database-backed `camera_edge_map` table for
+    production (with schema and GIS snapping recommendation)
+  - Weight model as explicit separate module: takes Huber DES output, produces
+    `IntArray` weight vectors for CCH customization
+  - Kotlin coroutine `Channel` replaces Kafka for simulation; `PacketSource`
+    interface as extension point for DE team's future broker
+  - Two-tier staleness TTL (stale at 5min, dead at 30min) with linear
+    confidence decay for graceful degradation
+  - Architecture risk (full-vector customization at high frequency) documented
+    with three candidate future fixes: delta customization, batched partial
+    updates, dual-buffer engine
+  - Quantified graph analysis: 1,869,499 edges, 166K tertiary+ (8.9%)
+  - Five-tier uncovered-edge strategy with neighbor congestion propagation
+  - 6 implementation phases, 6 simulation scenarios
+
 ## 2026-03-20 — Validator Support for Node-Split Line Graphs
 
 ### Summary
