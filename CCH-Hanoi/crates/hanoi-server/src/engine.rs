@@ -47,7 +47,7 @@ pub fn run_normal(
 
         match msg {
             Ok(Some(qm)) => {
-                let resp = dispatch_normal(&mut engine, qm.request);
+                let resp = dispatch_normal(&mut engine, qm.request, qm.format.as_deref());
                 let _ = qm.reply.send(resp);
             }
             Ok(None) => break, // Channel closed — shutdown
@@ -88,7 +88,7 @@ pub fn run_line_graph(
 
         match msg {
             Ok(Some(qm)) => {
-                let resp = dispatch_line_graph(&mut engine, qm.request);
+                let resp = dispatch_line_graph(&mut engine, qm.request, qm.format.as_deref());
                 let _ = qm.reply.send(resp);
             }
             Ok(None) => break,
@@ -106,8 +106,8 @@ pub fn run_line_graph(
 fn dispatch_normal(
     engine: &mut QueryEngine<'_>,
     req: QueryRequest,
+    format: Option<&str>,
 ) -> Result<Value, CoordRejection> {
-    let format = req.format.clone();
     let answer = if let (Some(flat), Some(flng), Some(tlat), Some(tlng)) =
         (req.from_lat, req.from_lng, req.to_lat, req.to_lng)
     {
@@ -129,14 +129,14 @@ fn dispatch_normal(
         None => tracing::info!("query returned no path"),
     }
 
-    Ok(format_response(answer, format.as_deref()))
+    Ok(format_response(answer, format))
 }
 
 fn dispatch_line_graph(
     engine: &mut LineGraphQueryEngine<'_>,
     req: QueryRequest,
+    format: Option<&str>,
 ) -> Result<Value, CoordRejection> {
-    let format = req.format.clone();
     let answer = if let (Some(flat), Some(flng), Some(tlat), Some(tlng)) =
         (req.from_lat, req.from_lng, req.to_lat, req.to_lng)
     {
@@ -158,15 +158,15 @@ fn dispatch_line_graph(
         None => tracing::info!("query returned no path"),
     }
 
-    Ok(format_response(answer, format.as_deref()))
+    Ok(format_response(answer, format))
 }
 
 /// Convert a query answer to the requested response format.
-/// `format`: None or "default" → standard JSON, "geojson" → GeoJSON Feature.
+/// Default (None) → GeoJSON Feature; `"json"` → plain JSON.
 fn format_response(answer: Option<QueryAnswer>, format: Option<&str>) -> Value {
     match format {
-        Some("geojson") => answer_to_geojson(answer),
-        _ => serde_json::to_value(answer_to_response(answer)).unwrap(),
+        Some("json") => serde_json::to_value(answer_to_response(answer)).unwrap(),
+        _ => answer_to_geojson(answer),
     }
 }
 

@@ -15,8 +15,12 @@ pub struct GatewayQueryRequest {
     // Node-ID-based
     pub from_node: Option<u32>,
     pub to_node: Option<u32>,
+}
 
-    /// Response format: omit or "default" for standard, "geojson" for GeoJSON Feature.
+/// URL query-string parameters for the gateway query endpoint.
+/// `format` is forwarded as a query param to the backend.
+#[derive(Deserialize)]
+pub struct GatewayFormatParam {
     pub format: Option<String>,
 }
 
@@ -35,8 +39,6 @@ pub struct BackendQueryRequest {
     pub from_node: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub to_node: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub format: Option<String>,
 }
 
 /// Gateway info request — selects which backend to query.

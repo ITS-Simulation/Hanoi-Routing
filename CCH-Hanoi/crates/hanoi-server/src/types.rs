@@ -16,8 +16,12 @@ pub struct QueryRequest {
     pub to_lng: Option<f32>,
     pub from_node: Option<u32>,
     pub to_node: Option<u32>,
-    /// Response format: omit or "default" for the standard response,
-    /// "geojson" for a GeoJSON Feature with LineString geometry.
+}
+
+/// URL query-string parameter for response format: `/query?format=json`.
+/// Default (omitted) → GeoJSON; `format=json` → plain JSON response.
+#[derive(Deserialize)]
+pub struct FormatParam {
     pub format: Option<String>,
 }
 

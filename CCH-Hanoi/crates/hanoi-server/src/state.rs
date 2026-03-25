@@ -11,6 +11,9 @@ use crate::types::{BboxInfo, QueryRequest};
 /// Message sent from the HTTP query handler to the background engine thread.
 pub struct QueryMsg {
     pub request: QueryRequest,
+    /// Response format from the URL query string (`?format=json`).
+    /// `None` → GeoJSON (default), `Some("json")` → plain JSON.
+    pub format: Option<String>,
     pub reply: tokio::sync::oneshot::Sender<Result<serde_json::Value, CoordRejection>>,
 }
 

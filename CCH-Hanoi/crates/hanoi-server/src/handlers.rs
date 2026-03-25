@@ -1,6 +1,6 @@
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use serde_json::Value;
 use std::sync::atomic::Ordering;
@@ -9,19 +9,21 @@ use rust_road_router::datastr::graph::INFINITY;
 
 use crate::state::{AppState, QueryMsg};
 use crate::types::{
-    CustomizeResponse, HealthResponse, InfoResponse, QueryRequest, QueryResponse, ReadyResponse,
+    CustomizeResponse, FormatParam, HealthResponse, InfoResponse, QueryRequest, QueryResponse, ReadyResponse,
 };
 
 /// POST /query — route query (coordinate-based or node-ID-based).
-/// The response format depends on the `format` field in the request body:
-/// omit or "default" → standard QueryResponse, "geojson" → GeoJSON Feature.
+/// Response format is controlled by the `format` query parameter:
+/// omit → GeoJSON Feature (default), `?format=json` → plain JSON.
 pub async fn handle_query(
     State(state): State<AppState>,
+    Query(params): Query<FormatParam>,
     Json(req): Json<QueryRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     let msg = QueryMsg {
         request: req,
+        format: params.format,
         reply: tx,
     };
 

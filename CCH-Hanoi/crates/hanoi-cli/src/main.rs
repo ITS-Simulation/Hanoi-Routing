@@ -88,6 +88,11 @@ enum Command {
         /// Output format
         #[arg(long, value_enum, default_value_t = OutputFormat::Geojson)]
         output_format: OutputFormat,
+
+        /// Add simplestyle-spec visualization properties to GeoJSON output
+        /// (stroke, stroke-width, fill, fill-opacity)
+        #[arg(long, default_value_t = false)]
+        demo: bool,
     },
 
     /// Display graph metadata (num nodes, num edges) without building the CCH.
@@ -110,6 +115,7 @@ fn format_result(
     path: &[u32],
     coordinates: &[(f32, f32)],
     format: &OutputFormat,
+    demo: bool,
 ) -> serde_json::Value {
     match format {
         OutputFormat::Geojson => {
@@ -117,6 +123,17 @@ fn format_result(
                 .iter()
                 .map(|&(lat, lng)| [lng, lat]) // GeoJSON: [longitude, latitude]
                 .collect();
+            let mut props = serde_json::json!({
+                "distance_ms": distance_ms,
+                "distance_m": distance_m
+            });
+            if demo {
+                let obj = props.as_object_mut().unwrap();
+                obj.insert("stroke".into(), serde_json::json!("#ff5500"));
+                obj.insert("stroke-width".into(), serde_json::json!(10));
+                obj.insert("fill".into(), serde_json::json!("#ffaa00"));
+                obj.insert("fill-opacity".into(), serde_json::json!(0.4));
+            }
             serde_json::json!({
                 "type": "FeatureCollection",
                 "features": [{
@@ -125,11 +142,7 @@ fn format_result(
                         "type": "LineString",
                         "coordinates": coords
                     },
-                    "properties": {
-                        "distance_ms": distance_ms,
-                        "distance_m": distance_m,
-                        "path_nodes": path
-                    }
+                    "properties": props
                 }]
             })
         }
@@ -237,6 +250,7 @@ fn main() {
             to_lng,
             output_file,
             output_format,
+            demo,
         } => {
             let answer = if line_graph {
                 let lg_dir = data_dir.join("line_graph");
@@ -304,7 +318,7 @@ fn main() {
 
             match answer {
                 Some(a) => {
-                    let output = format_result(a.distance_ms, a.distance_m, &a.path, &a.coordinates, &output_format);
+                    let output = format_result(a.distance_ms, a.distance_m, &a.path, &a.coordinates, &output_format, demo);
                     let output_str = serde_json::to_string_pretty(&output).unwrap();
 
                     let path = output_file.unwrap_or_else(|| {

@@ -4,7 +4,7 @@ use axum::http::StatusCode;
 use reqwest::Client;
 use serde_json::Value;
 
-use crate::types::{BackendQueryRequest, GatewayQueryRequest, InfoQuery};
+use crate::types::{BackendQueryRequest, GatewayFormatParam, GatewayQueryRequest, InfoQuery};
 
 /// Shared gateway state — holds HTTP clients and backend URLs.
 #[derive(Clone)]
@@ -42,8 +42,10 @@ impl GatewayState {
 }
 
 /// POST /query — forward to the appropriate backend based on graph_type.
+/// Response format is controlled by the `format` query parameter (forwarded to backend).
 pub async fn handle_query(
     State(state): State<GatewayState>,
+    Query(params): Query<GatewayFormatParam>,
     Json(req): Json<GatewayQueryRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let backend = state.backend_url(&req.graph_type).ok_or((
@@ -58,12 +60,17 @@ pub async fn handle_query(
         to_lng: req.to_lng,
         from_node: req.from_node,
         to_node: req.to_node,
-        format: req.format,
+    };
+
+    // Forward format as a query parameter to the backend
+    let url = match params.format.as_deref() {
+        Some(fmt) => format!("{}/query?format={fmt}", backend),
+        None => format!("{}/query", backend),
     };
 
     let resp = state
         .client
-        .post(format!("{}/query", backend))
+        .post(&url)
         .json(&backend_req)
         .send()
         .await
