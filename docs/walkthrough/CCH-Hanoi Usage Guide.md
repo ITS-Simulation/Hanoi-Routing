@@ -1037,13 +1037,14 @@ bench_report --baseline run1.json --current run2.json
 
 **Request (coordinate-based)**:
 
+`POST /query` (default: GeoJSON response) or `POST /query?format=json` (plain JSON).
+
 ```json
 {
   "from_lat": 21.028,
   "from_lng": 105.834,
   "to_lat": 21.006,
-  "to_lng": 105.843,
-  "format": "default"
+  "to_lng": 105.843
 }
 ```
 
@@ -1068,29 +1069,7 @@ bench_report --baseline run1.json --current run2.json
 }
 ```
 
-**Response (default format)** — 200 OK:
-
-```json
-{
-  "distance_ms": 142300,
-  "distance_m": 3842.7,
-  "path_nodes": [1523, 1524, 1530, 1547, 1563],
-  "coordinates": [[21.028, 105.834], [21.025, 105.836], ...]
-}
-```
-
-**Response (no path found)** — 200 OK:
-
-```json
-{
-  "distance_ms": null,
-  "distance_m": null,
-  "path_nodes": [],
-  "coordinates": []
-}
-```
-
-**Response (GeoJSON format)** — `"format": "geojson"`:
+**Response (default — GeoJSON)** — 200 OK:
 
 ```json
 {
@@ -1108,6 +1087,19 @@ bench_report --baseline run1.json --current run2.json
 
 Note: GeoJSON coordinates are `[longitude, latitude]` per RFC 7946 (reversed
 from internal convention). When no path is found, `"geometry": null`.
+
+**Response (JSON format)** — `POST /query?format=json`:
+
+```json
+{
+  "distance_ms": 142300,
+  "distance_m": 3842.7,
+  "path_nodes": [1523, 1524, 1530, 1547, 1563],
+  "coordinates": [[21.028, 105.834], [21.025, 105.836], ...]
+}
+```
+
+When no path is found: `distance_ms`/`distance_m` are `null`, arrays are empty.
 
 **Error Response** — 400 Bad Request (coordinate validation):
 
@@ -1436,9 +1428,9 @@ curl -s http://localhost:8080/health | python3 -m json.tool
 
 **What to verify**:
 
-- `distance_ms` > 0 (route exists)
-- `path_nodes` is non-empty and contains valid node IDs
-- `coordinates` has same length as `path_nodes` (+ 2 for coordinate queries)
+- Response is a GeoJSON Feature with `"type": "Feature"` and `"geometry"` / `"properties"`
+- `properties.distance_ms` > 0 (route exists)
+- `geometry.coordinates` is non-empty with `[lng, lat]` pairs (RFC 7946 order)
 - All coordinates are within the Hanoi bounding box
 - `GET /info` returns correct `num_nodes` and `num_edges`
 - `GET /ready` returns `{"ready": true}`
@@ -1578,20 +1570,28 @@ curl -s "http://localhost:50051/info?graph_type=normal" | python3 -m json.tool
 curl -s "http://localhost:50051/info?graph_type=line_graph" | python3 -m json.tool
 ```
 
-### 13.6 Testing GeoJSON Output
+### 13.6 Testing Response Formats
 
 ```bash
-# Request GeoJSON format
+# Default response is GeoJSON (no query param needed)
 curl -s -X POST http://localhost:8080/query \
   -H "Content-Type: application/json" \
   -d '{
     "from_lat": 21.028, "from_lng": 105.834,
-    "to_lat": 21.006, "to_lng": 105.843,
-    "format": "geojson"
+    "to_lat": 21.006, "to_lng": 105.843
+  }' | python3 -m json.tool
+
+# Explicit JSON format via query parameter
+curl -s -X POST "http://localhost:8080/query?format=json" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from_lat": 21.028, "from_lng": 105.834,
+    "to_lat": 21.006, "to_lng": 105.843
   }' | python3 -m json.tool
 ```
 
-**Verify**: `geometry.coordinates` uses `[longitude, latitude]` order (RFC 7946).
+**Verify**: Default response has `geometry.coordinates` with `[longitude, latitude]` order
+(RFC 7946). `?format=json` returns flat `distance_ms`/`coordinates` fields.
 
 ### 13.7 Testing Error Cases
 
@@ -1658,7 +1658,8 @@ bench_report --baseline baseline.json --current current.json --threshold 10
 | Coordinate validation rejects invalid | `curl` with bad coords                                                    | 400 error                  |
 | Weight validation rejects INFINITY    | Upload weights with >= 2^31/2                                             | 400 error                  |
 | Gateway routes correctly              | `curl POST /query {"graph_type": "..."}`                                  | Routes to correct backend  |
-| GeoJSON format correct                | `curl POST /query {"format": "geojson"}`                                  | Valid GeoJSON Feature      |
+| GeoJSON format correct (default)      | `curl POST /query` (no query param)                                       | Valid GeoJSON Feature      |
+| JSON format via query param           | `curl POST /query?format=json`                                            | Flat JSON response         |
 | Graceful shutdown                     | Send SIGTERM to server                                                    | Clean exit within 30s      |
 
 
@@ -1750,7 +1751,7 @@ POST /query  {"from_lat": 21.028, "from_lng": 105.834, ...}
            │
            ▼
   ┌─────────────────┐
-  │ Format response  │  Default JSON or GeoJSON Feature
+  │ Format response  │  Default GeoJSON or ?format=json
   └────────┬────────┘
            │
            ▼

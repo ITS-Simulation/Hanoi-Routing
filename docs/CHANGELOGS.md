@@ -1,5 +1,117 @@
 # CHANGELOGS.md
 
+## 2026-03-25 — Docs: Unified 8-node graph examples across CCH Deep Dive
+
+- **`docs/walkthrough/CCH Deep Dive.md`**: Replaced all per-section toy examples
+  (3-node, 5-node) with a single 8-node directed graph traced end-to-end through
+  every CCH stage:
+  - **Stage 1 (IFC)**: Corrected to symmetrize graph via `add_back_arcs` (8 added
+    reverses → 26 arcs), fixed inter-arc capacity from ∞ to 1, rewrote
+    Ford-Fulkerson trace on the expanded graph yielding separator {C,E} (was {E}),
+    corrected to 8 geographic directions (was 4).
+  - **Stage 2 (Contraction)**: Full FAST algorithm trace producing 4 shortcuts
+    (B—G, G—C, H—C, H—E), 17-edge chordal supergraph.
+  - **Stage 3 (Elimination Tree)**: Tree derived from contraction parent pointers,
+    showing how tree shape mirrors the nested dissection structure.
+  - **Stage 4 (Customization)**: Complete triangle relaxation trace for all 8
+    nodes, showing how each shortcut gets its weight (e.g., C—E relaxed from 6 to
+    2 via C→B(1)+B→E(1)).
+  - **Stage 5 (Query)**: Bidirectional walk for query A→H, meeting at E with
+    distance 12.
+  - **Stage 6 (Unpacking)**: Recursive shortcut unpacking of A→H producing final
+    path A→C→B→E→F→H = 12.
+
+## 2026-03-24 — Server: GeoJSON default + format as query parameter
+
+- **`CCH-Hanoi/crates/hanoi-server/src/`**: Moved `format` from the JSON
+  request body to a URL query parameter (`?format=json`). GeoJSON is now the
+  default response format (no query param needed); pass `?format=json` for the
+  legacy flat JSON response.
+  - `types.rs`: Removed `format` from `QueryRequest`, added `FormatParam` struct
+  - `handlers.rs`: Added `Query<FormatParam>` extractor alongside `Json` body
+  - `state.rs`: Added `format: Option<String>` to `QueryMsg`
+  - `engine.rs`: Flipped default in `format_response` (GeoJSON first, JSON on
+    explicit `?format=json`)
+- **`CCH-Hanoi/crates/hanoi-gateway/src/`**: Updated gateway to accept `format`
+  as a query parameter and forward it to backend URLs.
+  - `types.rs`: Removed `format` from `GatewayQueryRequest`/`BackendQueryRequest`,
+    added `GatewayFormatParam`
+  - `proxy.rs`: Extracts `format` from query params, appends to backend URL
+- **`CCH-Hanoi/README.md`** + **`docs/walkthrough/CCH-Hanoi Usage Guide.md`**:
+  Updated API docs, curl examples, verification checklists, and flowcharts to
+  reflect GeoJSON-default behavior and `?format=json` query parameter.
+
+## 2026-03-24 — CCH Deep Dive Walkthrough
+
+- **`docs/walkthrough/CCH Deep Dive.md`**: Conceptual deep-dive explaining
+  the meaning behind CCH data structures, the elimination tree, and triangular
+  relaxation. Covers the full transformation pipeline (CSR → node ordering →
+  contraction → elimination tree → customization → query → path unpacking)
+  with step-by-step worked examples, ASCII visualizations, and a complete
+  data structure reference. Complements the existing CCH Walkthrough (which
+  covers operational commands/code) with the "why" behind each transformation.
+  - Updated Section 5 (Elimination Tree) with expanded clarification: what the
+    tree is vs. is not (contraction history, not network representation), what
+    the root represents (graph-theoretic bisector, not traffic importance),
+    how layering maps to geographic scope (leaves = local side-streets,
+    root = city bisector), and how tree depth determines query cost for
+    close-by vs. cross-city routes.
+  - Updated Section 4 (Contraction) with CH vs. CCH comparison: why CH
+    contraction is weight-dependent (witness search) while CCH is weight-
+    independent (unconditional shortcuts), how nested dissection ordering
+    confines shortcuts within cells (no cross-partition leakage), the FAST
+    algorithm's lowest-neighbor-merge optimization vs. all-pairs connection,
+    and the core tradeoff table (more shortcuts but ~1s recustomization vs
+    CH's fewer shortcuts but full rebuild on weight change).
+
+## 2026-03-24 — CLI GeoJSON cleanup + --demo flag
+
+- **`CCH-Hanoi/crates/hanoi-cli/src/main.rs`**:
+  - Removed `path_nodes` array from GeoJSON `properties`. The LineString
+    geometry already encodes the full path; raw node IDs are meaningless
+    outside the graph and bloat the file. JSON output retains `path_nodes`.
+  - Added `--demo` boolean flag to `Query` command. When active, injects
+    simplestyle-spec properties (`stroke: #ff5500`, `stroke-width: 3`,
+    `fill: #ffaa00`, `fill-opacity: 0.4`) into GeoJSON output for quick
+    visualization in geojson.io / GitHub / QGIS.
+
+## 2026-03-24 — Smoother Module Implementation Guide
+
+- **`docs/walkthrough/Smoother Module.md`**: Step-by-step implementation guide
+  for the Huber DES smoother module. Covers all 5 source files, build config,
+  6 unit tests with test helpers, and verification checklist. Designed to be
+  self-contained (no dependencies on other CCH_Data_Pipeline modules).
+
+## 2026-03-24 — Live Weight Pipeline Plan Rev 4: Dual-Signal + I/O Contracts
+
+### Summary
+
+Major revision to live weight pipeline plan. Added dual-signal architecture
+(speed + occupancy per camera), inter-module I/O data format specification,
+temporal misalignment resolution, and aligned module layout with actual
+`CCH_Data_Pipeline` Gradle project structure.
+
+### Changes
+
+- **`docs/planned/Live Weight Pipeline.md`** (Rev 4):
+  - `SpeedPacket` → `CameraPacket` carrying both `speedKmh` and `occupancy`
+  - Dual-lane aggregation: `DualAggregator` demuxes into `SpeedSummary` and
+    `OccupancySummary` channels with shared window boundaries
+  - Generic `Smoother<S>` interface with per-lane Huber DES parameters
+    (speed: α=0.3/β=0.1/δ=15km/h; occupancy: α=0.2/β=0.05/δ=0.15)
+  - New `EdgeJoiner` component with three-tier alignment strategy:
+    co-temporal (< 30s), stale-gap (decayed confidence), dead-gap
+    (fundamental-diagram interpolation)
+  - `JoinedEdgeState` data class combining speed + occupancy + alignmentAge
+  - Weight model updated to use occupancy scaling formula
+  - New Section 5: full inter-module I/O data format specification with
+    exact data classes, invariants, serialization formats, and boundary map
+  - Project structure aligned to actual `CCH_Data_Pipeline/` modules
+    (app, simulation, smoother, modeler)
+  - Section numbering corrected (1–14)
+
+---
+
 ## 2026-03-23 — Live Weight Pipeline Plan
 
 ### Summary

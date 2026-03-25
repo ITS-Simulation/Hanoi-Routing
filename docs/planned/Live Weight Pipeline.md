@@ -1,7 +1,7 @@
 # Live Weight Pipeline — Plan & Critique
 
-**Status:** Draft (Rev 3)
-**Date:** 2026-03-23
+**Status:** Draft (Rev 4)
+**Date:** 2026-03-24
 **Phase:** Data Handling Pipeline (horizontal T-bar)
 
 ---
@@ -60,9 +60,9 @@ without it, the pipeline has no way to produce output.
 
 **Simulation backbone:** Use a config-driven mapping (JSON file listing
 camera_id → edge_ids). For simulation, auto-generate this from graph metadata.
-See Section 5 for the full camera-edge mapping design.
+See Section 6 for the full camera-edge mapping design.
 
-**Production recommendation:** See Section 5.3 for the database-backed
+**Production recommendation:** See Section 6.3 for the database-backed
 approach when the camera fleet is real.
 
 #### B. No Backpressure or Windowing Semantics
@@ -80,9 +80,9 @@ The Kafka/MQ layer is infrastructure that the Data Engineering team will own
 in production. For simulation, we don't need an external broker — Kotlin's
 coroutine channels provide the same semantics in-process.
 
-**Decision:** Use `Channel<SpeedPacket>` (Kotlin coroutines) for simulation.
+**Decision:** Use `Channel<CameraPacket>` (Kotlin coroutines) for simulation.
 Design the ingest layer as an interface so a Kafka/NATS consumer can be
-swapped in later without touching pipeline logic. See Section 6.4.
+swapped in later without touching pipeline logic. See Section 7.4.
 
 #### D. Each Component Is a Camera
 
@@ -101,7 +101,7 @@ The edge reverts to pure baseline + time-of-day modulation.
 - **Detection:** The weight model checks `lastUpdateMs` per edge on every
 window tick — not just when data arrives.
 
-See Section 6.5 for the full TTL design.
+See Section 7.5 for the full TTL design.
 
 ### 2.3 Architecture Risk: Full-Vector Customization Frequency
 
@@ -161,39 +161,45 @@ approaches:
 │         ├──────────────────────────────────────────────┐                  │
 │         ▼                                              ▼                  │
 │  ┌───────────────┐                           ┌──────────────────┐        │
-│  │  Camera Sim   │    SpeedPacket             │  Influence Map   │        │
-│  │  (N coroutines │───→ Channel<SpeedPacket>  │  Precomputation  │        │
+│  │  Camera Sim   │   CameraPacket              │  Influence Map   │        │
+│  │  (N coroutines │───→ Channel<CameraPacket> │  Precomputation  │        │
 │  │  batched)      │                           │  (BFS from       │        │
 │  └───────────────┘                            │   covered edges) │        │
 │         │                                     └────────┬─────────┘        │
 │         ▼                                              │                  │
-│  ┌───────────────┐    Tumbling 30s windows             │                  │
-│  │  Aggregator    │────→ Map<EdgeId, WindowSummary>    │                  │
-│  └───────────────┘                                     │                  │
-│         │                                              │                  │
-│         ▼                                              │                  │
-│  ┌───────────────┐    Per-edge: level, trend,          │                  │
-│  │  Huber DES     │    lastUpdateMs                    │                  │
-│  │  Smoother      │────→ Map<EdgeId, SmoothedState>    │                  │
-│  └───────────────┘                                     │                  │
-│         │                                              │                  │
-│         ▼                                              │                  │
-│  ┌─────────────────────────────────────────────────────┴────────────┐     │
-│  │  Weight Model (separate module)                                   │    │
-│  │                                                                   │    │
-│  │  Input: smoothed states + baseline + influence map + sim clock    │    │
-│  │                                                                   │    │
-│  │  Covered edges:                                                   │    │
-│  │    smoothed_speed → travel_time_ms (via geo_distance)             │    │
-│  │    confidence blend with baseline                                 │    │
-│  │    staleness TTL check                                            │    │
-│  │                                                                   │    │
-│  │  Uncovered edges:                                                 │    │
-│  │    time-of-day Gaussian modulation (always on)                    │    │
-│  │    + neighbor congestion propagation (if influence exists)        │    │
-│  │                                                                   │    │
-│  │  Output: IntArray(1_869_499) — one u32 weight per edge            │    │
-│  └────────────────────────────┬──────────────────────────────────────┘    │
+│  ┌───────────────┐    Tumbling 30s windows (shared boundary)          │   │
+│  │ Dual Aggregator│                                                   │   │
+│  │  ├─ Speed lane │────→ List<SpeedSummary>                           │   │
+│  │  └─ Occup lane │────→ List<OccupancySummary>                       │   │
+│  └───────────────┘                                                    │   │
+│         │ (two parallel lanes)                                        │   │
+│         ▼                                                             │   │
+│  ┌───────────────┐    Per-edge: level, trend, lastUpdateMs            │   │
+│  │ Speed Smoother │────→ Map<EdgeId, SmootherState>  ──┐              │   │
+│  │ (Huber DES)    │                                    │              │   │
+│  ├───────────────┤                                     ▼              │   │
+│  │ Occup Smoother │────→ Map<EdgeId, SmootherState>  Joiner           │   │
+│  │ (Huber DES)    │                                  (alignment)      │   │
+│  └───────────────┘                                     │              │   │
+│         │                                    Map<EdgeId,JoinedState>  │   │
+│         ▼                                              │              │   │
+│  ┌─────────────────────────────────────────────────────┴──────────┐   │   │
+│  │  Weight Model (separate module)                                 │  │   │
+│  │                                                                 │  │   │
+│  │  Input: joined states + baseline + influence map + sim clock    │  │   │
+│  │                                                                 │  │   │
+│  │  Covered edges:                                                 │  │   │
+│  │    smoothed_speed → travel_time_ms (via geo_distance)           │  │   │
+│  │    × occupancy scaling factor                                   │  │   │
+│  │    confidence blend with baseline                               │  │   │
+│  │    staleness TTL check (per-lane, use worst)                    │  │   │
+│  │                                                                 │  │   │
+│  │  Uncovered edges:                                               │  │   │
+│  │    time-of-day Gaussian modulation (always on)                  │  │   │
+│  │    + neighbor congestion propagation (if influence exists)      │  │   │
+│  │                                                                 │  │   │
+│  │  Output: IntArray(1_869_499) — one u32 weight per edge          │  │   │
+│  └────────────────────────────┬────────────────────────────────────┘  │   │
 │                               │                                          │
 │                               ▼                                          │
 │                    POST /customize (7.5 MB, little-endian u32)           │
@@ -215,42 +221,50 @@ or rewritten without affecting the rest of the pipeline.
 
 ### 4.1 Stage Interfaces
 
+Each camera produces **two data signals**: speed (flow velocity) and occupancy
+(road utilization fraction). These flow through parallel aggregation and
+smoothing pipelines, then **join** at the weight model.
+
 ```
-┌──────────┐    SpeedPacket     ┌──────────┐   List<WindowSummary>  ┌──────────┐
-│  Ingest  │ ─────────────────→ │ Aggregator│ ────────────────────→ │ Smoother │
-│          │  Channel<Packet>   │          │                        │          │
-└──────────┘                    └──────────┘                        └────┬─────┘
-                                                                        │
-                                                          SmootherSnapshot│
-                                                                        ▼
-┌──────────┐    IntArray         ┌──────────┐                     ┌──────────┐
-│  Output  │ ←────────────────── │  Weight  │ ←───────────────────│  (state) │
-│          │   (weight vector)   │  Model   │  SmootherSnapshot   │          │
-└──────────┘                     └──────────┘                     └──────────┘
+                              ┌──────────────┐   List<SpeedSummary>   ┌──────────────┐
+                         ┌───→│ SpeedAggr.   │───────────────────────→│ SpeedSmoother│──┐
+                         │    └──────────────┘                        └──────────────┘  │
+┌──────────┐  CameraPacket│                                                              │
+│  Ingest  │─────────────┤                                                   SmootherSnapshot
+│          │  Channel     │                                                    (both)    │
+└──────────┘             │    ┌──────────────┐   List<OccupancySummary>┌──────────────┐  │
+                         └───→│ OccupAggr.   │───────────────────────→│ OccupSmoother│──┤
+                              └──────────────┘                        └──────────────┘  │
+                                                                                        ▼
+┌──────────┐    IntArray       ┌──────────────┐                                   ┌──────────┐
+│  Output  │←──────────────────│  Weight      │←──────────────────────────────────│  Joiner  │
+│          │  (weight vector)  │  Model       │     JoinedEdgeState               │          │
+└──────────┘                   └──────────────┘                                   └──────────┘
 ```
 
 Each interface is a Kotlin `interface` or `data class`:
 
 ```kotlin
-// === Ingest → Aggregator ===
-// Contract: SpeedPacket on a Channel. Ingest produces, Aggregator consumes.
-// The Channel is the only coupling point.
+// === Ingest → Aggregators ===
+// Contract: CameraPacket on a Channel. Ingest produces, both aggregators consume.
+// Each packet carries BOTH speed and occupancy from the same camera snapshot.
 
-data class SpeedPacket(
+data class CameraPacket(
     val cameraId: Int,
-    val timestampMs: Long,
-    val speedKmh: Float,
-    val confidence: Float       // 0.0–1.0
+    val timestampMs: Long,      // simulation time (shared clock)
+    val speedKmh: Float,        // flow velocity measurement
+    val occupancy: Float,       // road occupancy ∈ [0.0, 1.0]
+    val confidence: Float       // 0.0–1.0, sensor self-reported quality
 )
 
 interface PacketSource {
-    fun packets(): ReceiveChannel<SpeedPacket>
+    fun packets(): ReceiveChannel<CameraPacket>
 }
 
-// === Aggregator → Smoother ===
-// Contract: a batch of per-edge window summaries, emitted every window tick.
+// === Aggregator → Smoother (speed lane) ===
+// Contract: a batch of per-edge speed summaries, emitted every window tick.
 
-data class WindowSummary(
+data class SpeedSummary(
     val edgeId: Int,
     val meanSpeedKmh: Float,
     val observationCount: Int,
@@ -258,31 +272,64 @@ data class WindowSummary(
     val windowEndMs: Long
 )
 
-interface Aggregator {
-    fun summaries(): ReceiveChannel<List<WindowSummary>>
+// === Aggregator → Smoother (occupancy lane) ===
+// Contract: a batch of per-edge occupancy summaries, emitted every window tick.
+
+data class OccupancySummary(
+    val edgeId: Int,
+    val meanOccupancy: Float,   // ∈ [0.0, 1.0]
+    val observationCount: Int,
+    val variance: Float,
+    val windowEndMs: Long
+)
+
+interface Aggregator<S> {
+    fun summaries(): ReceiveChannel<List<S>>
 }
 
-// === Smoother → Weight Model ===
-// Contract: a snapshot of all smoother states. The weight model reads this
-// immutably — the smoother owns the mutable state.
+// === Smoother → Joiner ===
+// Contract: a snapshot of all smoother states. The joiner reads both
+// snapshots immutably — each smoother owns its own mutable state.
 
 data class SmootherState(
-    val level: Double,          // current smoothed speed
-    val trend: Double,          // speed change per window
+    val level: Double,          // current smoothed value (speed km/h or occupancy 0–1)
+    val trend: Double,          // change per window
     val lastUpdateMs: Long,     // for staleness detection
     val observationCount: Int   // for confidence
 )
 
-interface Smoother {
-    fun update(summaries: List<WindowSummary>)
+interface Smoother<S> {
+    fun update(summaries: List<S>)
     fun snapshot(): Map<Int, SmootherState>
+}
+
+// === Joiner → Weight Model ===
+// Contract: a per-edge combined view of speed + occupancy state.
+// The joiner resolves temporal misalignment between the two lanes.
+
+data class JoinedEdgeState(
+    val speedState: SmootherState,
+    val occupancyState: SmootherState,
+    val alignmentAge: Long      // |speed.lastUpdateMs - occupancy.lastUpdateMs|
+)
+
+interface EdgeJoiner {
+    /**
+     * Combine speed and occupancy snapshots into a single aligned view.
+     * Handles the case where one lane has data and the other doesn't.
+     */
+    fun join(
+        speedStates: Map<Int, SmootherState>,
+        occupancyStates: Map<Int, SmootherState>,
+        nowMs: Long
+    ): Map<Int, JoinedEdgeState>
 }
 
 // === Weight Model → Output ===
 // Contract: a complete weight vector (IntArray of exactly numEdges elements).
 
 interface WeightModel {
-    fun computeWeights(states: Map<Int, SmootherState>, nowMs: Long): IntArray
+    fun computeWeights(states: Map<Int, JoinedEdgeState>, nowMs: Long): IntArray
 }
 
 interface WeightOutput {
@@ -293,33 +340,38 @@ interface WeightOutput {
 ### 4.2 Why This Level of Separation Matters
 
 
-| Scenario                               | What You Swap           | Everything Else Unchanged                 |
-| -------------------------------------- | ----------------------- | ----------------------------------------- |
-| Switch from simulation to real cameras | `PacketSource` impl     | Aggregator, Smoother, WeightModel, Output |
-| Try a different smoothing algorithm    | `Smoother` impl         | Ingest, Aggregator, WeightModel, Output   |
-| Change how uncovered edges are handled | `WeightModel` impl      | Ingest, Aggregator, Smoother, Output      |
-| Send weights to a file instead of HTTP | `WeightOutput` impl     | Everything upstream                       |
-| Replace tumbling windows with sliding  | `Aggregator` impl       | Ingest, Smoother, WeightModel, Output     |
-| Add Kafka as the ingest source         | New `PacketSource` impl | All downstream stages                     |
-| Replace Huber DES with EMA/Kalman      | New `Smoother` impl     | All other stages                          |
+| Scenario                                    | What You Swap                | Everything Else Unchanged                          |
+| ------------------------------------------- | ---------------------------- | -------------------------------------------------- |
+| Switch from simulation to real cameras      | `PacketSource` impl          | Both aggregators, both smoothers, joiner, modeler  |
+| Try Kalman for speed smoothing only         | Speed `Smoother` impl        | Occupancy lane entirely, ingest, joiner, modeler   |
+| Change how uncovered edges are handled      | `WeightModel` impl           | Both lanes, joiner, output                         |
+| Send weights to a file instead of HTTP      | `WeightOutput` impl          | Everything upstream                                |
+| Replace tumbling windows with sliding       | Both `Aggregator` impls      | Ingest, both smoothers, joiner, modeler, output    |
+| Add Kafka as the ingest source              | New `PacketSource` impl      | All downstream stages                              |
+| Add a third signal (e.g. queue length)      | New aggregator + smoother    | Extend `EdgeJoiner`, existing lanes unchanged      |
+| Change alignment strategy (e.g. hold-last)  | `EdgeJoiner` impl            | Both lanes, weight model, output                   |
 
 
 ### 4.3 Testing Strategy per Module
 
 Each module is testable in isolation with synthetic inputs:
 
-- **Ingest:** Verify it produces `SpeedPacket` at the expected rate and
-distribution. Test: create a `SimulatedPacketSource`, collect 1000 packets,
-check statistical properties.
-- **Aggregator:** Feed a known sequence of `SpeedPacket` into a channel, verify
-the emitted `WindowSummary` values (mean, count, variance) match hand-
-computed expectations.
-- **Smoother:** Feed a known sequence of `WindowSummary` batches. Verify
-convergence (steady input → level converges to input speed), outlier
-rejection (spike → level barely moves), trend tracking (linear ramp →
-trend matches slope).
-- **Weight Model:** Create synthetic `SmootherState` maps. Verify: covered
-edges get speed-to-weight conversion, uncovered edges get time-of-day
+- **Ingest:** Verify it produces `CameraPacket` with both speed and occupancy
+at the expected rate and distribution. Test: create a `SimulatedPacketSource`,
+collect 1000 packets, check statistical properties of both signals.
+- **Speed Aggregator:** Feed known `CameraPacket` sequence, verify emitted
+`SpeedSummary` values (mean, count, variance) match hand-computed expectations.
+- **Occupancy Aggregator:** Same, but verify `OccupancySummary` values. Confirm
+occupancy stays clamped to [0.0, 1.0].
+- **Smoother (either lane):** Feed a known sequence of summary batches. Verify
+convergence, outlier rejection, trend tracking. Both lanes use the same
+`Smoother<S>` interface, so the algorithm is tested once.
+- **Joiner:** Feed two synthetic `Map<Int, SmootherState>` snapshots with
+deliberately misaligned timestamps. Verify: aligned edges get both states,
+speed-only edges get occupancy filled from interpolation, occupancy-only
+edges get speed filled, stale gaps beyond threshold produce warnings.
+- **Weight Model:** Create synthetic `JoinedEdgeState` maps. Verify: covered
+edges use both speed and occupancy, uncovered edges get time-of-day
 modulation, stale edges decay toward baseline, all weights are in
 `[1, INFINITY-1]`.
 - **Output:** Mock HTTP server. Verify the POST body is exactly
@@ -327,9 +379,446 @@ modulation, stale edges decay toward baseline, all weights are in
 
 ---
 
-## 5. Camera-Edge Mapping
+## 5. Inter-Module I/O Data Formats
 
-### 4.1 Data Model
+This section defines the **exact data types** that flow between modules. Each
+boundary has one producer and one consumer. Modules are decoupled: a module
+only needs to know the data type at its input and output boundaries, not the
+internals of who produces or consumes it.
+
+### 5.1 Module Boundary Map (Dual-Lane Architecture)
+
+Each camera produces two signals. The pipeline splits into two parallel lanes
+after ingest, then **joins** before the weight model:
+
+```
+                              ┌─────────────┐  SpeedSummary  ┌─────────────┐
+                         ┌───→│ SpeedAggr.  │───────────────→│ SpeedSmooth │──┐
+                         │    └─────────────┘                └─────────────┘  │
+┌──────────┐ CameraPacket│                                                    │ Map<Int,SmootherState>
+│ Ingest   │─────────────┤                                                    │  (×2)
+│(simulat.)│  Channel    │                                                    ▼
+└──────────┘             │    ┌─────────────┐  OccupSummary  ┌─────────────┐ ┌──────────┐
+                         └───→│ OccupAggr.  │───────────────→│ OccupSmooth │→│  Joiner  │
+                              └─────────────┘                └─────────────┘ └────┬─────┘
+                                                                                  │ Map<Int,JoinedEdgeState>
+                                                                                  ▼
+                              ┌─────────────┐    IntArray    ┌─────────────┐
+                              │  Output     │←───────────────│ WeightModel │
+                              │(CustomizeHTP│                │  (modeler)  │
+                              └─────────────┘                └─────────────┘
+```
+
+Gradle module boundaries:
+
+| From Module    | To Module      | Crossing Type     | Data Format                          |
+| -------------- | -------------- | ----------------- | ------------------------------------ |
+| `simulation`   | `simulation`   | In-module channel | `Channel<CameraPacket>`              |
+| `simulation`   | `smoother`     | Cross-module call | `List<SpeedSummary>` (speed lane)    |
+| `simulation`   | `smoother`     | Cross-module call | `List<OccupancySummary>` (occup lane)|
+| `smoother`     | `modeler`      | Cross-module call | `Map<Int, SmootherState>` (×2 maps)  |
+| `modeler`      | `modeler`      | In-module join    | `Map<Int, JoinedEdgeState>`          |
+| `modeler`      | hanoi-server   | HTTP POST         | `ByteArray` (little-endian u32)      |
+
+Note: `simulation → smoother` and `smoother → modeler` are **function call
+boundaries** orchestrated by `app/Main.kt`. The modules don't import each other
+— `app` imports all three and wires them together. The joiner lives in `modeler`
+because alignment is a weight-model concern (it decides how to handle gaps).
+
+### 5.2 Boundary 1: Ingest → Aggregators (within `simulation`)
+
+**Direction:** `CameraSimulator` produces → both aggregators consume
+**Transport:** `Channel<CameraPacket>` (kotlinx.coroutines)
+**Module:** All live in `simulation/`
+
+```kotlin
+/**
+ * One observation from one camera at one point in time.
+ * Carries BOTH speed and occupancy — the camera captures a single
+ * snapshot that includes both measurements simultaneously.
+ *
+ * Lives in: simulation/ingest/CameraPacket.kt
+ */
+@Serializable
+data class CameraPacket(
+    val cameraId: Int,          // which camera produced this reading
+    val timestampMs: Long,      // simulation time (NOT wall clock)
+    val speedKmh: Float,        // flow velocity in km/h (may be noisy)
+    val occupancy: Float,       // road occupancy fraction ∈ [0.0, 1.0]
+    val confidence: Float       // 0.0–1.0, sensor self-reported quality
+)
+```
+
+**Invariants:**
+- `speedKmh >= 0.0` (negative speed is physically impossible)
+- `occupancy ∈ [0.0, 1.0]` (0 = empty road, 1 = fully saturated)
+- `confidence ∈ [0.0, 1.0]`
+- `timestampMs` is monotonically non-decreasing per `cameraId`
+- `cameraId` maps to a valid entry in `CameraEdgeMapping`
+
+**Fan-out:** The ingest channel feeds a single `CameraPacket` to the simulation
+module. Inside `simulation`, the packet is **demuxed** into the two aggregators:
+the speed aggregator reads `speedKmh`, the occupancy aggregator reads `occupancy`.
+Both receive the same packet — this guarantees they share the same `timestampMs`
+and `cameraId`, which is the foundation of temporal alignment.
+
+**Serialization:** In-memory only (channel). If Kafka is added later, serialize
+as JSON or Protobuf via `PacketSource` implementation — the downstream
+aggregators don't change.
+
+### 5.3 Boundary 2a: Speed Aggregator → Speed Smoother
+
+**Direction:** `SpeedAggregator` produces → speed `Smoother` consumes
+**Transport:** `Channel<List<SpeedSummary>>` or direct function call from `app`
+**Crossing:** `app` receives from the channel, passes to speed smoother
+
+```kotlin
+/**
+ * Aggregated speed statistics for one edge over one tumbling window.
+ *
+ * Lives in: simulation/aggregator/SpeedSummary.kt
+ */
+@Serializable
+data class SpeedSummary(
+    val edgeId: Int,            // graph edge index (0-based, < numEdges)
+    val meanSpeedKmh: Float,    // coverage-weighted mean speed in window
+    val observationCount: Int,  // number of CameraPackets contributing
+    val variance: Float,        // speed variance (for diagnostics)
+    val windowEndMs: Long       // simulation time at window close
+)
+```
+
+### 5.4 Boundary 2b: Occupancy Aggregator → Occupancy Smoother
+
+**Direction:** `OccupancyAggregator` produces → occupancy `Smoother` consumes
+**Transport:** `Channel<List<OccupancySummary>>` or direct function call
+**Crossing:** `app` receives from the channel, passes to occupancy smoother
+
+```kotlin
+/**
+ * Aggregated occupancy statistics for one edge over one tumbling window.
+ *
+ * Lives in: simulation/aggregator/OccupancySummary.kt
+ */
+@Serializable
+data class OccupancySummary(
+    val edgeId: Int,            // graph edge index (0-based, < numEdges)
+    val meanOccupancy: Float,   // coverage-weighted mean occupancy ∈ [0.0, 1.0]
+    val observationCount: Int,  // number of CameraPackets contributing
+    val variance: Float,        // occupancy variance (for diagnostics)
+    val windowEndMs: Long       // simulation time at window close
+)
+```
+
+**Invariants (both summary types):**
+- `edgeId ∈ [0, numEdges)` — always a valid graph edge index
+- `observationCount >= 1` (empty edges are omitted, not sent with count 0)
+- `meanSpeedKmh > 0.0` / `meanOccupancy ∈ [0.0, 1.0]`
+- `variance >= 0.0`
+- One summary per edge per window (duplicates are merged by aggregator)
+
+**Batch semantics:** Each smoother receives its own `List<*Summary>` — one batch
+per window tick. Both aggregators use the **same window boundary** (same
+`windowEndMs`), so batches are naturally aligned in time. Not all edges appear
+in every batch; absent edges retain their previous smoother state.
+
+### 5.5 Boundary 3: Smoothers → Joiner (`smoother` → `modeler`)
+
+**Direction:** Both smoothers produce snapshots → `EdgeJoiner` consumes
+**Transport:** Direct function call via `app` orchestration
+**Crossing:** `app` calls both `.snapshot()`, passes both maps to joiner in `modeler`
+
+```kotlin
+/**
+ * The smoothed state of one edge for ONE signal (speed or occupancy).
+ * The SmootherState type is shared between both lanes — the joiner
+ * interprets the `level` field based on which map it came from.
+ *
+ * Lives in: smoother/SmootherState.kt
+ */
+@Serializable
+data class SmootherState(
+    val level: Double,          // smoothed value (km/h for speed, 0–1 for occupancy)
+    val trend: Double,          // change per window
+    val lastUpdateMs: Long,     // sim time of last observation (for TTL)
+    val observationCount: Int   // cumulative observations (for confidence)
+)
+```
+
+**Transfer format:** Two `Map<Int, SmootherState>` — one from the speed smoother,
+one from the occupancy smoother. Keys are `edgeId`. Only edges that have ever
+received data appear in each map. An edge may appear in one map but not the other
+if a camera reported speed but not occupancy (or vice versa) — this is the
+**misalignment problem** addressed by the joiner.
+
+**Invariants:**
+- `level > 0.0` for speed; `level ∈ [0.0, 1.0]` for occupancy
+- `lastUpdateMs <= nowMs`
+- `observationCount >= 1`
+- Each map is an **immutable snapshot** — the joiner reads both, each smoother
+  continues mutating its own internal state independently
+
+### 5.6 Boundary 3.5: Joiner → Weight Model (within `modeler`)
+
+**Direction:** `EdgeJoiner.join()` produces → `LiveWeightModel.computeWeights()` consumes
+**Transport:** In-module function call
+**Module:** Both live in `modeler/`
+
+```kotlin
+/**
+ * Combined speed + occupancy state for one edge, after alignment.
+ * This is what the weight model uses to compute travel times.
+ *
+ * Lives in: modeler/JoinedEdgeState.kt
+ */
+@Serializable
+data class JoinedEdgeState(
+    val speedState: SmootherState,      // smoothed speed for this edge
+    val occupancyState: SmootherState,  // smoothed occupancy for this edge
+    val alignmentAge: Long              // |speed.lastUpdateMs - occupancy.lastUpdateMs|
+)
+```
+
+**Transfer format:** `Map<Int, JoinedEdgeState>` — key is `edgeId`. Only edges
+with at least one signal present appear. The joiner resolves three cases:
+
+| Speed data? | Occupancy data? | Joiner behavior                                   |
+| ----------- | --------------- | ------------------------------------------------- |
+| Yes         | Yes             | Direct join; `alignmentAge` = timestamp difference |
+| Yes         | No              | Interpolate occupancy from speed (see §5.8)        |
+| No          | Yes             | Interpolate speed from occupancy (see §5.8)        |
+| No          | No              | Edge absent from map → uncovered                   |
+
+`alignmentAge` is advisory — the weight model can use it to discount edges where
+the two signals are far apart in time.
+
+### 5.7 Boundary 4: Weight Model → HTTP Output (`modeler` → hanoi-server)
+
+**Direction:** `LiveWeightModel.computeWeights()` produces → `CustomizeClient.deliver()` sends
+**Transport:** In-memory `IntArray`, then serialized to HTTP POST body
+**Crossing:** Both live in `modeler/`
+
+```kotlin
+/**
+ * Complete weight vector for CCH customization.
+ *
+ * Produced by: modeler/LiveWeightModel.kt
+ * Consumed by: modeler/output/CustomizeClient.kt
+ * Delivered to: POST http://<server>/customize
+ */
+val weights: IntArray  // exactly numEdges elements (1,869,499 for Hanoi)
+```
+
+**Wire format (HTTP body):**
+- Length: `numEdges × 4` bytes (7,477,996 bytes for Hanoi)
+- Encoding: **little-endian unsigned 32-bit integers** (u32)
+- Each element: travel time in **milliseconds**
+- Byte order: native x86 little-endian (matches RoutingKit binary format)
+
+```kotlin
+// Serialization in CustomizeClient:
+val buffer = ByteBuffer.allocate(weights.size * 4).order(ByteOrder.LITTLE_ENDIAN)
+buffer.asIntBuffer().put(weights)
+val body: ByteArray = buffer.array()
+// POST body is exactly `body`, Content-Type: application/octet-stream
+```
+
+**Invariants:**
+- `weights.size == numEdges` (exact match; server rejects mismatched sizes)
+- `weights[i] ∈ [1, 2_147_483_646]` for all `i`
+  - `0` creates routing black holes (edge appears free but is unreachable)
+  - `2_147_483_647` (INFINITY) breaks CCH triangle relaxation
+- No NaN, no negative values (IntArray can't hold these, but the `Float → Int`
+  conversion in the weight model must guard against it)
+
+### 5.8 Temporal Misalignment: Problem & Solution
+
+**The problem:** Speed and occupancy observations come from the same camera, but
+after aggregation and independent smoothing, the two signals can drift apart:
+- A camera reports speed every 5s but occupancy every 10s (sensor quirk)
+- A camera drops out on one signal but not the other
+- Network jitter delivers packets out of order, so one aggregator window
+  captures a reading that the other window missed
+
+At the joiner, you might see `speed.lastUpdateMs = 120_000` and
+`occupancy.lastUpdateMs = 90_000` for the same edge — a 30-second gap. Combining
+a "current" speed with a "30 seconds stale" occupancy produces a physically
+inconsistent snapshot.
+
+**Solution: Three-tier alignment strategy in `EdgeJoiner`:**
+
+```
+Tier 1: Co-temporal (alignmentAge < windowSize, i.e. < 30s)
+  → Use both values directly. They're from the same or adjacent windows.
+  → alignmentAge is informational only; no adjustment needed.
+
+Tier 2: Stale gap (windowSize ≤ alignmentAge < staleThresholdMs)
+  → The fresher signal is trusted. The staler signal's SmootherState
+  → is used but with a decayed confidence:
+  →   staleConf = 1.0 - (alignmentAge - windowSize) / (staleThresholdMs - windowSize)
+  → The weight model applies this as an additional multiplier.
+
+Tier 3: Dead gap (alignmentAge ≥ staleThresholdMs)
+  → The staler signal is discarded entirely. The edge is treated as
+  → having only one signal. Interpolation fills the missing lane:
+  →   - Missing occupancy: estimate from speed via fundamental diagram
+  →     occupancy_est = 1.0 - (speed / freeFlowSpeed)
+  →   - Missing speed: estimate from occupancy via fundamental diagram
+  →     speed_est = freeFlowSpeed * (1.0 - occupancy)
+```
+
+```kotlin
+/**
+ * Lives in: modeler/EdgeJoiner.kt
+ */
+class DefaultEdgeJoiner(
+    private val windowSizeMs: Long = 30_000,
+    private val staleThresholdMs: Long = 5 * 60 * 1000,
+    private val freeFlowSpeeds: FloatArray       // per-edge, from baseline
+) : EdgeJoiner {
+
+    override fun join(
+        speedStates: Map<Int, SmootherState>,
+        occupancyStates: Map<Int, SmootherState>,
+        nowMs: Long
+    ): Map<Int, JoinedEdgeState> {
+        val allEdges = speedStates.keys + occupancyStates.keys
+        return allEdges.associateWith { edgeId ->
+            val speed = speedStates[edgeId]
+            val occup = occupancyStates[edgeId]
+            when {
+                speed != null && occup != null -> joinBoth(edgeId, speed, occup)
+                speed != null -> joinSpeedOnly(edgeId, speed)
+                else -> joinOccupancyOnly(edgeId, occup!!)
+            }
+        }
+    }
+    // ...
+}
+```
+
+**Why this works for simulation:** In the simulation scenario, both signals come
+from the same `CameraPacket` and share the same `timestampMs`. Both aggregators
+use the same window boundaries. So `alignmentAge` will be 0 for nearly all edges
+in normal operation — Tier 1 applies almost everywhere. Tiers 2 and 3 are
+safety nets for camera dropout, partial failure, and production scenarios where
+speed and occupancy sensors may genuinely have different reporting cadences.
+
+### 5.9 Supplementary Data: Graph + Mapping (loaded at startup)
+
+These are not inter-module "flows" but **shared read-only data** loaded once at
+startup by `app` and passed to modules that need them:
+
+```kotlin
+/**
+ * Graph topology and baseline weights, loaded from RoutingKit binary files.
+ *
+ * Lives in: simulation/graph/GraphData.kt
+ * Consumed by: simulation (camera sim), modeler (baseline weights, geo_distance)
+ */
+data class GraphData(
+    val numNodes: Int,
+    val numEdges: Int,
+    val firstOut: IntArray,      // [numNodes + 1] CSR offset array
+    val head: IntArray,          // [numEdges] target node per edge
+    val travelTime: IntArray,    // [numEdges] baseline travel time (ms)
+    val geoDistance: IntArray,   // [numEdges] edge length (meters)
+    val latitude: FloatArray,    // [numNodes] node latitude
+    val longitude: FloatArray    // [numNodes] node longitude
+)
+
+/**
+ * Camera-to-edge mapping, loaded from JSON config or database.
+ *
+ * Lives in: simulation/mapping/CameraMappingSource.kt
+ * Consumed by: simulation (camera sim + aggregator), modeler (influence map)
+ */
+data class CameraEdgeMapping(
+    val cameraId: Int,
+    val edges: List<EdgeInfluence>
+)
+
+data class EdgeInfluence(
+    val edgeId: Int,
+    val weight: Float            // 0.0–1.0, coverage fraction
+)
+```
+
+**Passing convention:** `app/Main.kt` loads `GraphData` and mapping at startup,
+then passes references to each module's constructor. Modules never load data
+files themselves — they receive pre-loaded, validated data.
+
+### 5.10 Complete Data Flow Summary
+
+```
+                         ┌─────── STARTUP (once) ───────┐
+                         │                               │
+                    GraphData                    CameraEdgeMapping
+                    (binary files)               (JSON config)
+                         │                               │
+                         ▼                               ▼
+              ┌─────── app/Main.kt ──────────────────────┐
+              │  Loads graph, mapping, wires modules      │
+              │  Passes references to constructors        │
+              └──────┬──────────┬──────────┬──────────┬───┘
+                     │          │          │          │
+                     ▼          │          │          │
+              simulation       │          │          │
+              ┌────────────┐   │          │          │
+              │ CameraSim  │   │          │          │
+              │  → CameraPacket (channel) │          │
+              │                │          │          │
+              │ ┌────────────┐ │          │          │
+              │ │SpeedAggr.  │─┼─→ List<SpeedSummary>│
+              │ └────────────┘ │          │          │
+              │ ┌────────────┐ │          │          │
+              │ │OccupAggr.  │─┼─→ List<OccupancySummary>
+              │ └────────────┘ │          │          │
+              └────────────┘   │          │          │
+                       │       │          │          │
+                       ▼       │          │          │
+              ┌── app loop ────┘          │          │
+              │  receives both batches    │          │
+              │  passes to smoothers ─────┘          │
+              └────────┬──────────────────┘          │
+                       │                             │
+                       ▼                             │
+              ┌────────────┐                         │
+              │SpeedSmooth │→ Map<Int,SmootherState> │
+              └────────────┘         │               │
+              ┌────────────┐         │               │
+              │OccupSmooth │→ Map<Int,SmootherState> │
+              └────────────┘         │               │
+                                     ▼               │
+              ┌── app loop ──────────────────────────┘
+              │  passes both snapshots to modeler
+              └────────┬───────────────────┘
+                       │
+                       ▼
+                 modeler
+              ┌────────────────────────────┐
+              │ EdgeJoiner                 │
+              │  .join(speed, occup, now)  │
+              │  → Map<Int,JoinedEdgeState>│
+              │                            │
+              │ LiveWeightModel            │
+              │  .computeWeights(          │
+              │     joinedStates,          │
+              │     nowMs                  │
+              │  ) → IntArray              │
+              │                            │
+              │ CustomizeClient            │
+              │  .deliver(IntArray)        │
+              │  → POST /customize         │
+              │    (7.5 MB binary)         │
+              └────────────────────────────┘
+```
+
+---
+
+## 6. Camera-Edge Mapping
+
+### 6.1 Data Model (Shared Types)
 
 ```kotlin
 /** One camera's relationship to the road network. */
@@ -356,7 +845,7 @@ data class CameraRef(
 )
 ```
 
-### 4.2 Simulation Backbone: Config-Driven Mapping
+### 6.2 Simulation Backbone: Config-Driven Mapping
 
 For simulation, the mapping is loaded from a JSON config file:
 
@@ -384,7 +873,7 @@ The auto-generator reads `travel_time` and `geo_distance` to compute implied
 speeds, then outputs the same JSON format. The pipeline itself doesn't care
 how the config was produced — it just reads the JSON.
 
-### 4.3 Production Recommendation: Database-Backed Mapping
+### 6.3 Production Recommendation: Database-Backed Mapping
 
 When real cameras exist and a database is available, the mapping source changes
 but the interface stays the same:
@@ -447,9 +936,9 @@ to pick up new cameras or deactivated ones.
 
 ---
 
-## 6. Tech Stack & Module Design
+## 7. Tech Stack & Module Design
 
-### 5.1 Language: Kotlin
+### 7.1 Language: Kotlin
 
 **Rationale:**
 
@@ -476,55 +965,68 @@ httpClient.post("http://localhost:9080/customize") {
 }
 ```
 
-### 5.2 Project Structure
+### 7.2 Project Structure
 
-New Kotlin/Gradle project: `Live_Network_Routing/`
+Kotlin/Gradle multi-module project: `CCH_Data_Pipeline/`
+
+Each Gradle subproject is a self-contained module with its own `build.gradle.kts`
+and test suite. Modules communicate only through the data types defined in their
+public APIs — no module imports internals from another.
 
 ```
-Live_Network_Routing/
-├── build.gradle.kts
-├── settings.gradle.kts
+CCH_Data_Pipeline/
+├── build.gradle.kts                 # Root: plugin declarations (apply false)
+├── settings.gradle.kts              # includes: app, simulation, smoother, modeler
 ├── gradle/
-│   └── libs.versions.toml          # Version catalog
-└── src/
-    └── main/kotlin/vts/hanoi/pipeline/
-        ├── Main.kt                  # Application entry point, CLI args
-        │
-        ├── graph/                   # Graph data loading (RoutingKit binary format)
-        │   ├── GraphData.kt         #   Loads first_out, head, travel_time, geo_distance, lat, lng
-        │   └── BinaryIO.kt          #   Little-endian u32/f32 vector I/O
-        │
-        ├── mapping/                 # Camera-edge mapping
-        │   ├── CameraMappingSource.kt   # Interface
-        │   ├── JsonFileMappingSource.kt # Simulation: reads JSON config
-        │   └── AutoGenerator.kt         # Auto-generate camera configs from graph
-        │
-        ├── ingest/                  # Data ingest layer
-        │   ├── PacketSource.kt      #   Interface: simulation vs production
-        │   ├── CameraSimulator.kt   #   Simulation: batched coroutine camera generators
-        │   └── SpeedPacket.kt       #   Data class
-        │
-        ├── aggregator/              # Windowed aggregation
-        │   ├── WindowAggregator.kt  #   Tumbling window, per-edge statistics
-        │   └── WindowSummary.kt     #   Data class
-        │
-        ├── smoother/                # Huber DES
-        │   ├── HuberDesSmoother.kt  #   Core algorithm
-        │   ├── SmootherState.kt     #   Per-edge state: level, trend, lastUpdateMs
-        │   └── SmootherConfig.kt    #   alpha, beta, delta parameters
-        │
-        ├── weight/                  # Weight modelling (separate module)
-        │   ├── WeightModel.kt       #   Interface
-        │   ├── LiveWeightModel.kt   #   Main implementation
-        │   ├── TimeOfDay.kt         #   Gaussian time-of-day modulation
-        │   ├── InfluenceMap.kt      #   Neighbor congestion propagation
-        │   └── StalenessPolicy.kt   #   TTL handling
-        │
-        └── output/                  # Weight delivery
-            └── CustomizeClient.kt   #   HTTP POST to hanoi-server /customize
+│   └── libs.versions.toml          # Version catalog (single source of truth)
+│
+├── app/                             # Application entry point + wiring
+│   ├── build.gradle.kts            #   depends on: simulation, smoother, modeler
+│   └── src/main/kotlin/com/thomas/cch_app/
+│       └── Main.kt                 #   CLI (clikt), pipeline orchestration
+│
+├── simulation/                      # Ingest + dual-lane aggregation + graph I/O
+│   ├── build.gradle.kts            #   depends on: (standalone, no project deps)
+│   └── src/main/kotlin/com/thomas/simulation/
+│       ├── graph/                  #   RoutingKit binary I/O
+│       │   ├── GraphData.kt       #     Loads first_out, head, travel_time, geo_distance, lat, lng
+│       │   └── BinaryIO.kt        #     Little-endian u32/f32 vector I/O
+│       ├── mapping/               #   Camera-edge mapping
+│       │   ├── CameraMappingSource.kt  # Interface
+│       │   ├── JsonFileMappingSource.kt
+│       │   └── AutoGenerator.kt   #     Auto-generate camera configs from graph
+│       ├── ingest/                #   Camera simulation
+│       │   ├── PacketSource.kt    #     Interface: produces ReceiveChannel<CameraPacket>
+│       │   ├── CameraSimulator.kt #     Batched coroutine generators (speed + occupancy)
+│       │   └── CameraPacket.kt    #     Data class (carries both signals)
+│       └── aggregator/            #   Dual-lane windowed aggregation
+│           ├── DualAggregator.kt  #     Demuxes CameraPacket into two summary channels
+│           ├── SpeedSummary.kt    #     Data class (speed lane output)
+│           └── OccupancySummary.kt#     Data class (occupancy lane output)
+│
+├── smoother/                        # Huber DES smoothing (generic, used for both lanes)
+│   ├── build.gradle.kts            #   depends on: (standalone, no project deps)
+│   └── src/main/kotlin/com/thomas/smoother/
+│       ├── Smoother.kt            #   Interface: Smoother<S>
+│       ├── HuberDesSmoother.kt    #   Core algorithm (generic over summary type)
+│       ├── SmootherState.kt       #   Per-edge state (shared type for both lanes)
+│       └── SmootherConfig.kt      #   alpha, beta, delta parameters (different per lane)
+│
+└── modeler/                         # Weight modelling + joining + output
+    ├── build.gradle.kts            #   depends on: (standalone, no project deps)
+    └── src/main/kotlin/com/thomas/modeler/
+        ├── EdgeJoiner.kt          #   Interface + DefaultEdgeJoiner (alignment logic)
+        ├── JoinedEdgeState.kt     #   Combined speed + occupancy per edge
+        ├── WeightModel.kt         #   Interface
+        ├── LiveWeightModel.kt     #   Main impl (speed→weight + occupancy scaling)
+        ├── TimeOfDay.kt           #   Gaussian time-of-day modulation
+        ├── InfluenceMap.kt        #   Neighbor congestion propagation (BFS)
+        ├── StalenessPolicy.kt     #   TTL handling
+        └── output/
+            └── CustomizeClient.kt #   HTTP POST to hanoi-server /customize
 ```
 
-### 5.3 Dependencies
+### 7.3 Dependencies
 
 ```kotlin
 // build.gradle.kts
@@ -554,7 +1056,7 @@ dependencies {
 
 No Kafka, no Redis, no database driver. Pure Kotlin, single fat JAR.
 
-### 5.4 Coroutine Architecture
+### 7.4 Coroutine Architecture
 
 ```kotlin
 fun main() = runBlocking {
@@ -565,44 +1067,55 @@ fun main() = runBlocking {
     val weightModel = LiveWeightModel(graph, influenceMap, stalenessPolicy)
 
     // In-process channel — replaces Kafka for simulation
-    val packetChannel = Channel<SpeedPacket>(capacity = Channel.BUFFERED)
+    val packetChannel = Channel<CameraPacket>(capacity = Channel.BUFFERED)
 
-    // Camera simulators: batched coroutines producing packets
+    // Camera simulators: batched coroutines producing packets (speed + occupancy)
     val simJob = launch {
         CameraSimulator(mapping, graph, simClock).run(packetChannel)
     }
 
-    // Aggregator: consumes packets, emits window summaries every 30s
-    val summaryChannel = Channel<List<WindowSummary>>(capacity = 1)
+    // Dual-lane aggregators: both consume from the same packet channel
+    val speedSummaryChannel = Channel<List<SpeedSummary>>(capacity = 1)
+    val occupSummaryChannel = Channel<List<OccupancySummary>>(capacity = 1)
     val aggJob = launch {
-        WindowAggregator(packetChannel, simClock, windowDuration).run(summaryChannel)
+        DualAggregator(packetChannel, simClock, windowDuration)
+            .run(speedSummaryChannel, occupSummaryChannel)
     }
 
-    // Main pipeline loop
-    for (summaries in summaryChannel) {
-        smoother.update(summaries)
-        val weights = weightModel.computeWeights(smoother.states, simClock.now())
+    // Main pipeline loop — collects both lanes per window tick
+    for (speedBatch in speedSummaryChannel) {
+        val occupBatch = occupSummaryChannel.receive()  // same window boundary
+
+        speedSmoother.update(speedBatch)
+        occupancySmoother.update(occupBatch)
+
+        val joined = joiner.join(
+            speedSmoother.snapshot(),
+            occupancySmoother.snapshot(),
+            simClock.now()
+        )
+        val weights = weightModel.computeWeights(joined, simClock.now())
         customizeClient.post(weights)
-        logger.info { "Window complete: ${summaries.size} edges updated" }
+        logger.info { "Window complete: ${speedBatch.size} speed + ${occupBatch.size} occup edges" }
     }
 }
 ```
 
-**Key design point:** The `Channel<SpeedPacket>` is the simulation stand-in
+**Key design point:** The `Channel<CameraPacket>` is the simulation stand-in
 for Kafka/NATS. The `PacketSource` interface abstracts this:
 
 ```kotlin
 interface PacketSource {
-    /** Infinite stream of speed packets. */
-    fun packets(): ReceiveChannel<SpeedPacket>
+    /** Infinite stream of camera packets (speed + occupancy). */
+    fun packets(): ReceiveChannel<CameraPacket>
 }
 
 class SimulatedPacketSource(
     private val simulator: CameraSimulator,
     private val scope: CoroutineScope
 ) : PacketSource {
-    override fun packets(): ReceiveChannel<SpeedPacket> {
-        val channel = Channel<SpeedPacket>(Channel.BUFFERED)
+    override fun packets(): ReceiveChannel<CameraPacket> {
+        val channel = Channel<CameraPacket>(Channel.BUFFERED)
         scope.launch { simulator.run(channel) }
         return channel
     }
@@ -617,7 +1130,7 @@ When the DE department provides a Kafka/NATS deployment, you implement the
 corresponding `PacketSource` and swap it in `Main.kt`. The rest of the
 pipeline — aggregator, smoother, weight model, HTTP output — stays untouched.
 
-### 5.5 Staleness TTL Design
+### 7.5 Staleness TTL Design
 
 ```kotlin
 data class StalenessPolicy(
@@ -644,17 +1157,25 @@ fun StalenessPolicy.confidence(lastUpdateMs: Long, nowMs: Long): Float {
 }
 ```
 
-**How it integrates with the weight model:**
+**How it integrates with the weight model (dual-lane):**
 
 ```
-For each covered edge e:
-    staleness_conf = stalenessPolicy.confidence(smoother[e].lastUpdateMs, now)
-    observation_conf = min(smoother[e].observationCount / CONF_SATURATION, 1.0)
+For each covered edge e in joinedStates:
+    // Staleness is evaluated per-lane — use the WORSE of the two
+    speed_conf = stalenessPolicy.confidence(joined[e].speedState.lastUpdateMs, now)
+    occup_conf = stalenessPolicy.confidence(joined[e].occupancyState.lastUpdateMs, now)
+    staleness_conf = min(speed_conf, occup_conf)
 
-    effective_conf = staleness_conf * observation_conf
+    observation_conf = min(joined[e].speedState.observationCount / CONF_SATURATION, 1.0)
+    alignment_conf = if joined[e].alignmentAge < windowSize then 1.0
+                     else max(0.0, 1.0 - alignmentAge / staleThresholdMs)
+
+    effective_conf = staleness_conf * observation_conf * alignment_conf
 
     if effective_conf > 0:
-        live_weight = speed_to_travel_time(smoother[e].level + smoother[e].trend)
+        live_speed = joined[e].speedState.level + joined[e].speedState.trend
+        occupancy_factor = 1.0 + OCCUPANCY_WEIGHT * (joined[e].occupancyState.level - 0.2)
+        live_weight = speed_to_travel_time(live_speed) * occupancy_factor
         weight[e] = lerp(baseline[e], live_weight, effective_conf)
     else:
         // Dead — treat as uncovered
@@ -669,17 +1190,18 @@ mark and the 30-minute dead mark).
 
 ---
 
-## 7. Detailed Algorithm Design
+## 8. Detailed Algorithm Design
 
-### 6.1 Huber DES Algorithm
+### 8.1 Huber DES Algorithm
 
 Standard Double Exponential Smoothing (Holt's method) with Huber loss for
-robust parameter updates:
+robust parameter updates. The **same algorithm** is used for both the speed
+lane and the occupancy lane — only the parameters differ.
 
 ```
-For each window summary (edge_id, observed_speed):
+For each window summary (edge_id, observed_value):
     predicted = level + trend
-    residual  = observed_speed - predicted
+    residual  = observed_value - predicted
 
     // Huber weighting: downweight large residuals
     if |residual| <= delta:
@@ -688,51 +1210,62 @@ For each window summary (edge_id, observed_speed):
         w = delta / |residual|
 
     // Weighted DES update
-    level = alpha * (w * observed_speed + (1-w) * predicted) + (1-alpha) * (level + trend)
+    level = alpha * (w * observed_value + (1-w) * predicted) + (1-alpha) * (level + trend)
     trend = beta  * (level - prev_level) + (1-beta) * trend
 ```
 
-**Parameters:**
+**Parameters per lane:**
 
-- `alpha` (level smoothing): 0.3 — reasonable start for 30s windows.
-- `beta` (trend smoothing): 0.1 — trend should change slowly.
-- `delta` (Huber threshold): ~15 km/h — observations more than 15 km/h off
-from prediction are downweighted.
+| Parameter | Speed Lane  | Occupancy Lane | Rationale                                          |
+| --------- | ----------- | -------------- | -------------------------------------------------- |
+| `alpha`   | 0.3         | 0.2            | Occupancy changes more slowly; lower α = more inertia |
+| `beta`    | 0.1         | 0.05           | Occupancy trend is even more gradual                |
+| `delta`   | 15 km/h     | 0.15           | 15% occupancy jump is suspicious; scale matches unit |
 
-### 6.2 Weight Model (Separate Module)
+The `Smoother<S>` generic interface means both lanes use the same Huber DES
+implementation — only the config and the summary type differ.
 
-The weight model is explicitly separated from the smoother. Its interface:
+### 8.2 Weight Model (Separate Module)
+
+The weight model is explicitly separated from the smoother. It receives
+**joined** speed + occupancy state and produces travel-time weights:
 
 ```kotlin
 interface WeightModel {
     /**
-     * Given smoother output and the current simulation time,
+     * Given joined speed/occupancy states and the current simulation time,
      * produce a complete weight vector for ALL edges.
      *
      * The returned IntArray has exactly numEdges elements,
      * each a u32 travel time in milliseconds, in [1, 2_147_483_646].
      */
     fun computeWeights(
-        smootherStates: Map<Int, SmootherState>,
+        states: Map<Int, JoinedEdgeState>,
         nowMs: Long
     ): IntArray
 }
 ```
 
-`**LiveWeightModel` implementation responsibilities:**
+**`LiveWeightModel` implementation responsibilities:**
 
 1. **Covered edges with fresh data:** Convert smoothed speed to travel time
-  via `geo_distance`. Confidence-blend with baseline. Apply staleness TTL.
-2. **Covered edges gone stale:** Gradual blend back to baseline per TTL policy.
+  via `geo_distance`. Apply **occupancy scaling** — high occupancy inflates
+  the travel time even if speed hasn't dropped yet (anticipates imminent
+  slowdown). Confidence-blend with baseline. Apply staleness TTL.
+2. **Occupancy scaling formula:**
+   `occupancy_factor = 1.0 + OCCUPANCY_WEIGHT * (occupancy - FREE_FLOW_OCCUPANCY)`
+   where `OCCUPANCY_WEIGHT ≈ 0.5` and `FREE_FLOW_OCCUPANCY ≈ 0.2`.
+   At occupancy 0.8: factor = 1.3 (30% travel time inflation).
+3. **Covered edges gone stale:** Gradual blend back to baseline per TTL policy.
   Once dead, treat as uncovered.
-3. **Uncovered edges with influence:** Apply time-of-day modulation +
+4. **Uncovered edges with influence:** Apply time-of-day modulation +
   neighbor congestion propagation from the influence map.
-4. **Uncovered edges without influence:** Apply time-of-day modulation only.
-5. **Clamping:** All weights clamped to `[1, 2_147_483_646]`. Zero-weight
+5. **Uncovered edges without influence:** Apply time-of-day modulation only.
+6. **Clamping:** All weights clamped to `[1, 2_147_483_646]`. Zero-weight
   edges create routing black holes. Weights >= INFINITY (2,147,483,647)
    break CCH triangle relaxation.
 
-### 6.3 Camera Simulator Design
+### 8.3 Camera Simulator Design
 
 ```kotlin
 /**
@@ -741,9 +1274,13 @@ interface WeightModel {
  *
  * Each camera generates readings with:
  *   - baseSpeed: derived from the edge's baseline travel_time + geo_distance
- *   - noise: Gaussian with configurable std dev
+ *   - baseOccupancy: inversely correlated with speed via fundamental diagram
+ *   - noise: Gaussian with configurable std dev (independent per signal)
  *   - spikeProbability: chance of outlier (tests Huber robustness)
- *   - timeOfDayModulation: rush hour slowdown, night speedup
+ *   - timeOfDayModulation: rush hour slowdown + occupancy increase
+ *
+ * Speed and occupancy are generated from the same camera snapshot,
+ * sharing the same timestampMs — guaranteeing co-temporality at ingest.
  *
  * Time acceleration: 1 real second = N sim minutes (configurable).
  * At 60x, a full 24-hour cycle completes in 24 real minutes.
@@ -759,9 +1296,9 @@ class CameraSimulator(
 
 ---
 
-## 8. Coverage Model: Quantified Analysis
+## 9. Coverage Model: Quantified Analysis
 
-### 7.1 Hanoi Graph Breakdown by Road Class
+### 9.1 Hanoi Graph Breakdown by Road Class
 
 Reverse-engineered from `travel_time` and `geo_distance` using RoutingKit's
 speed-to-class mapping in `osm_profile.cpp`:
@@ -784,7 +1321,7 @@ speed-to-class mapping in `osm_profile.cpp`:
 | **TOTAL**                |               | **1,869,499** | **100%**   |
 
 
-### 7.2 Camera Placement Is Decoupled from Highway Class
+### 9.2 Camera Placement Is Decoupled from Highway Class
 
 In reality, camera placement doesn't follow highway classification neatly.
 A tertiary road might have no camera; a busy residential road near a school
@@ -796,7 +1333,7 @@ a config from the speed-based heuristic (~166K cameras). But the architecture
 must not assume this — the same pipeline should work with 500 cameras or
 500,000.
 
-### 7.3 Ingest Rate Analysis
+### 9.3 Ingest Rate Analysis
 
 
 | Camera Count     | Interval | Packets/sec |
@@ -811,7 +1348,7 @@ All well within Kotlin `Channel` capacity (millions/sec in-process).
 
 ---
 
-## 9. Handling Uncovered Edges — The Central Design Problem
+## 10. Handling Uncovered Edges — The Central Design Problem
 
 This is the most important section of the plan. The smoother, the simulator,
 the channel — those are straightforward engineering. The hard question is:
@@ -980,7 +1517,7 @@ Phase 4:  Strategy 4 (directional) — only if rat-running persists
 
 ---
 
-## 10. Simulation Scenarios
+## 11. Simulation Scenarios
 
 
 | Scenario               | Purpose                                                                                                                                        |
@@ -995,7 +1532,7 @@ Phase 4:  Strategy 4 (directional) — only if rat-running persists
 
 ---
 
-## 11. What NOT to Build Yet
+## 12. What NOT to Build Yet
 
 1. **GIS camera snapping** — The spatial matching of camera GPS to graph
   edges. Use config-driven mapping for now.
@@ -1010,71 +1547,85 @@ Phase 4:  Strategy 4 (directional) — only if rat-running persists
 
 ---
 
-## 12. Implementation Order
+## 13. Implementation Order
 
 ### Phase 1: Foundation
 
-- `graph/` — RoutingKit binary I/O (read `first_out`, `head`, `travel_time`,
-`geo_distance`, `latitude`, `longitude` as little-endian vectors)
-- `mapping/` — `CameraMappingSource` interface + JSON loader + auto-generator
-- `smoother/` — Huber DES with unit tests
-- `weight/WeightModel.kt` — Interface definition
-- **Deliverable:** Unit tests pass. Smoother converges on synthetic sequences.
-Graph loads correctly from Hanoi data directory.
+- `simulation/graph/` — RoutingKit binary I/O (read `first_out`, `head`,
+`travel_time`, `geo_distance`, `latitude`, `longitude` as little-endian vectors)
+- `simulation/mapping/` — `CameraMappingSource` interface + JSON loader +
+auto-generator
+- `smoother/` — Generic `Smoother<S>` interface + Huber DES with unit tests
+(test with both speed and occupancy summary types)
+- `modeler/WeightModel.kt` — Interface definition
+- `modeler/EdgeJoiner.kt` — Interface + `DefaultEdgeJoiner` with alignment tiers
+- **Deliverable:** Unit tests pass. Smoother converges on synthetic sequences
+for both lanes. Graph loads correctly from Hanoi data directory.
 
-### Phase 2: Weight Model + Time-of-Day
+### Phase 2: Weight Model + Joiner + Time-of-Day
 
-- `weight/LiveWeightModel.kt` — Baseline blending, confidence, staleness TTL
-- `weight/TimeOfDay.kt` — Gaussian modulation
-- `weight/StalenessPolicy.kt` — TTL with linear decay
-- **Deliverable:** Given synthetic smoother states, produces valid `IntArray`
-weight vectors that pass `/customize` validation. Time-of-day creates
-visible variation across simulated hours.
+- `modeler/LiveWeightModel.kt` — Baseline blending, occupancy scaling,
+confidence, staleness TTL
+- `modeler/TimeOfDay.kt` — Gaussian modulation
+- `modeler/StalenessPolicy.kt` — TTL with linear decay
+- `modeler/DefaultEdgeJoiner.kt` — Three-tier alignment (co-temporal, stale,
+dead) with fundamental-diagram interpolation
+- **Deliverable:** Given synthetic `JoinedEdgeState` maps, produces valid
+`IntArray` weight vectors. Occupancy scaling visibly inflates travel time
+at high occupancy. Alignment tiers handle mismatched timestamps correctly.
 
-### Phase 3: Simulator + Aggregator
+### Phase 3: Simulator + Dual-Lane Aggregator
 
-- `ingest/CameraSimulator.kt` — Batched coroutines with time-of-day patterns
-- `aggregator/WindowAggregator.kt` — Tumbling 30s windows
-- **Deliverable:** Cameras produce packets, aggregator emits window summaries.
+- `simulation/ingest/CameraSimulator.kt` — Batched coroutines generating
+`CameraPacket` with both speed and occupancy (correlated via fundamental diagram)
+- `simulation/aggregator/DualAggregator.kt` — Demuxes packets into
+`SpeedSummary` and `OccupancySummary` channels with shared window boundaries
+- **Deliverable:** Cameras produce dual-signal packets, aggregator emits
+synchronized speed and occupancy summary batches.
 
 ### Phase 4: End-to-End Pipeline
 
-- `Main.kt` — Wire everything, POST to hanoi-server
-- `output/CustomizeClient.kt` — HTTP client
+- `app/Main.kt` — Wire everything: ingest → dual aggregators → dual smoothers
+→ joiner → weight model → HTTP output
+- `modeler/output/CustomizeClient.kt` — HTTP client
 - CLI args (graph dir, server URL, window size, camera config, time accel)
 - **Deliverable:** Run alongside `hanoi_server`, observe weight customization,
-run queries and see route changes during simulated rush hour.
+run queries and see route changes during simulated rush hour. Verify both
+speed and occupancy contribute to weight computation.
 
 ### Phase 5: Neighbor Propagation
 
-- `weight/InfluenceMap.kt` — BFS precomputation + per-window spillover
+- `modeler/InfluenceMap.kt` — BFS precomputation + per-window spillover
 - **Deliverable:** Congestion on arterials visibly affects adjacent residential
 street weights. Run sparse-coverage scenario to validate.
 
 ### Phase 6: Validation
 
-- Run all 6 simulation scenarios from Section 10
-- Verify smoother stability, staleness recovery, outlier rejection
+- Run all 6 simulation scenarios from Section 11
+- Verify smoother stability on both lanes, staleness recovery, outlier rejection
+- Test alignment tiers: simulate camera dropout on one signal only
 - Measure customization latency (window close → server ACK)
 - **Deliverable:** Documented test results.
 
 ---
 
-## 13. Summary of Recommendations
+## 14. Summary of Recommendations
 
 
-| Topic                          | Recommendation                                                                                                                               |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Language**                   | Kotlin, new `Live_Network_Routing` Gradle project                                                                                            |
-| **Streaming**                  | Kotlin coroutine `Channel` for simulation; `PacketSource` interface for future broker swap                                                   |
-| **Camera mapping**             | Config-driven (JSON) now; `CameraMappingSource` interface for database-backed production                                                     |
-| **Smoothing**                  | Huber DES with windowed aggregation; separate module                                                                                         |
-| **Weight model**               | Separate module; takes smoother output → produces `IntArray` for CCH customization                                                           |
-| **Uncovered edges**            | Time-of-day Gaussian modulation + neighbor congestion propagation (inverted BFS)                                                             |
-| **Staleness**                  | Two-tier TTL (stale at 5min, dead at 30min) with linear confidence decay                                                                     |
-| **Broker**                     | Deferred to DE team; `PacketSource` interface is the extension point                                                                         |
-| **Customization frequency**    | 30s windows; sub-10s documented as future work with three candidate approaches                                                               |
-| **Camera → edge (production)** | Database-backed via `camera_edge_map` table; GIS snapping is a separate project                                                              |
-| **Modularity**                 | Each stage is an interface (`PacketSource`, `Aggregator`, `Smoother`, `WeightModel`, `WeightOutput`); swap any stage without touching others |
+| Topic                          | Recommendation                                                                                                                                          |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Language**                   | Kotlin, `CCH_Data_Pipeline` Gradle multi-module project                                                                                                  |
+| **Dual signals**               | Each `CameraPacket` carries speed + occupancy; split into parallel lanes after ingest                                                                    |
+| **Streaming**                  | Kotlin coroutine `Channel` for simulation; `PacketSource` interface for future broker swap                                                               |
+| **Camera mapping**             | Config-driven (JSON) now; `CameraMappingSource` interface for database-backed production                                                                 |
+| **Smoothing**                  | Generic `Smoother<S>` with Huber DES; two instances (speed lane, occupancy lane) with different parameters                                               |
+| **Signal alignment**           | Three-tier joiner: co-temporal (< 30s), stale-gap (decay), dead-gap (fundamental-diagram interpolation)                                                  |
+| **Weight model**               | Separate module; takes `JoinedEdgeState` (speed + occupancy) → produces `IntArray` with occupancy scaling                                                |
+| **Uncovered edges**            | Time-of-day Gaussian modulation + neighbor congestion propagation (inverted BFS)                                                                         |
+| **Staleness**                  | Two-tier TTL (stale at 5min, dead at 30min) with linear confidence decay; per-lane evaluation                                                            |
+| **Broker**                     | Deferred to DE team; `PacketSource` interface is the extension point                                                                                     |
+| **Customization frequency**    | 30s windows; sub-10s documented as future work with three candidate approaches                                                                           |
+| **Camera → edge (production)** | Database-backed via `camera_edge_map` table; GIS snapping is a separate project                                                                          |
+| **Modularity**                 | Each stage is an interface (`PacketSource`, `Aggregator<S>`, `Smoother<S>`, `EdgeJoiner`, `WeightModel`, `WeightOutput`); swap any without touching others |
 
 
