@@ -1,22 +1,13 @@
 plugins {
-    kotlin("jvm") version "2.3.10"
+    alias(libs.plugins.kotlin.jvm) apply false
+    alias(libs.plugins.kotlin.serialization) apply false
+    alias(libs.plugins.shadow) apply false
 }
 
-group = "com.thomas"
-version = "1.0-SNAPSHOT"
-
-repositories {
-    mavenCentral()
-}
-
-dependencies {
-    testImplementation(kotlin("test"))
-}
-
-kotlin {
-    jvmToolchain(21)
-}
-
-tasks.test {
-    useJUnitPlatform()
+allprojects {
+    group = "com.thomas"
+    version = "0.0.1"
+    repositories {
+        mavenCentral()
+    }
 }
