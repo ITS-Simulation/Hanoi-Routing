@@ -1,5 +1,14 @@
 # CHANGELOGS.md
 
+## 2026-03-26 — CCH-Generator: Downgrade travel-time >24h check to warning
+
+- **`CCH-Generator/src/validate_graph.cpp`**: Changed the "Travel time sanity"
+  check for arcs exceeding 24h travel time from a hard `[FAIL]` to a `[WARN]`.
+  Country-scale maps (e.g., full Vietnam) can have legitimately long road
+  segments on slow rural/mountain roads that exceed 24h, which is a data
+  characteristic rather than structural corruption. Zero-travel-time arcs were
+  already treated as warnings; this makes the behavior consistent.
+
 ## 2026-03-25 — Docs: Unified 8-node graph examples across CCH Deep Dive
 
 - **`docs/walkthrough/CCH Deep Dive.md`**: Replaced all per-section toy examples

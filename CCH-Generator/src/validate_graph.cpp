@@ -481,7 +481,7 @@ int main(int argc, char*argv[]){
 					if(!zero_samples.empty())
 						append_sample_list(detail, zero_samples);
 				}
-				report_check("Travel time sanity", false, detail.str(), state);
+				report_check("Travel time sanity", false, detail.str(), state, true);
 			}else if(zero_travel_time > 0){
 				detail << zero_travel_time << " zero travel-time arcs (possible ferries or data artifacts)";
 				if(!zero_samples.empty())
