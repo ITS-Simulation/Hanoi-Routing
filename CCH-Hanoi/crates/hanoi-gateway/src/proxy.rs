@@ -1,21 +1,54 @@
+use std::collections::HashMap;
+
 use axum::Json;
+use axum::body::Bytes;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use reqwest::Client;
 use serde_json::Value;
 
-use crate::types::{BackendQueryRequest, GatewayFormatParam, GatewayQueryRequest, InfoQuery};
+use crate::config::ProfileConfig;
+use crate::types::{GatewayQueryParam, InfoQuery};
 
-/// Shared gateway state — holds HTTP clients and backend URLs.
+/// Shared gateway state — holds the HTTP client and per-profile backend config.
+///
+/// # API surface
+///
+/// | Method | Path       | Description                                             |
+/// |--------|------------|---------------------------------------------------------|
+/// | POST   | `/query`   | Route query — `?profile=<name>` selects the backend     |
+/// | GET    | `/info`    | Backend metadata — `?profile=<name>` (optional)         |
+/// | GET    | `/profiles`| List all available routing profiles                     |
+///
+/// ## Profile selection
+///
+/// Every query **must** specify a `profile` query parameter that matches a key
+/// in the gateway YAML config's `profiles` map. Unknown profiles are rejected
+/// with HTTP 400 and a list of valid options.
+///
+/// ## Request format
+///
+/// ```text
+/// POST /query?profile=car
+/// Content-Type: application/json
+///
+/// {
+///   "from_lat": 21.028,  "from_lng": 105.854,
+///   "to_lat":   21.007,  "to_lng":   105.820
+/// }
+/// ```
+///
+/// The JSON body is forwarded to the backend unchanged.
+/// Query parameters `format` and `colors` are forwarded unchanged.
 #[derive(Clone)]
 pub struct GatewayState {
     client: Client,
-    normal_url: String,
-    line_graph_url: String,
+    /// Profile name → backend configuration. Populated from the YAML config.
+    profiles: HashMap<String, ProfileConfig>,
 }
 
 impl GatewayState {
-    pub fn new(normal_url: &str, line_graph_url: &str, timeout_secs: u64) -> Self {
+    pub fn new(profiles: HashMap<String, ProfileConfig>, timeout_secs: u64) -> Self {
         let client = if timeout_secs > 0 {
             reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(timeout_secs))
@@ -25,53 +58,66 @@ impl GatewayState {
             Client::new()
         };
 
-        GatewayState {
-            client,
-            normal_url: normal_url.trim_end_matches('/').to_string(),
-            line_graph_url: line_graph_url.trim_end_matches('/').to_string(),
-        }
+        GatewayState { client, profiles }
     }
 
-    fn backend_url(&self, graph_type: &str) -> Option<&str> {
-        match graph_type {
-            "normal" => Some(&self.normal_url),
-            "line_graph" => Some(&self.line_graph_url),
-            _ => None,
-        }
+    fn backend_url(&self, profile: &str) -> Option<&str> {
+        self.profiles.get(profile).map(|p| p.backend_url.as_str())
+    }
+
+    /// Return the sorted list of available profile names (for error messages
+    /// and the /profiles endpoint).
+    fn available_profiles(&self) -> Vec<&str> {
+        let mut names: Vec<&str> = self.profiles.keys().map(|s| s.as_str()).collect();
+        names.sort_unstable();
+        names
     }
 }
 
-/// POST /query — forward to the appropriate backend based on graph_type.
-/// Response format is controlled by the `format` query parameter (forwarded to backend).
+/// POST /query?profile=car — forward to the appropriate backend.
+///
+/// The `profile` query parameter selects the backend. The JSON body is forwarded
+/// to the backend unchanged. Query parameters `format` and `colors` are also
+/// forwarded to the backend.
+///
+/// # Errors
+///
+/// - **400 Bad Request** — unknown or missing profile (response includes `available_profiles`)
+/// - **502 Bad Gateway** — backend unreachable or returned invalid JSON
 pub async fn handle_query(
     State(state): State<GatewayState>,
-    Query(params): Query<GatewayFormatParam>,
-    Json(req): Json<GatewayQueryRequest>,
+    Query(params): Query<GatewayQueryParam>,
+    body: Bytes,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let backend = state.backend_url(&req.graph_type).ok_or((
-        StatusCode::BAD_REQUEST,
-        Json(serde_json::json!({"error": format!("unknown graph_type: {}", req.graph_type)})),
-    ))?;
+    let backend = state.backend_url(&params.profile).ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": format!("unknown profile: {}", params.profile),
+                "available_profiles": state.available_profiles(),
+            })),
+        )
+    })?;
 
-    let backend_req = BackendQueryRequest {
-        from_lat: req.from_lat,
-        from_lng: req.from_lng,
-        to_lat: req.to_lat,
-        to_lng: req.to_lng,
-        from_node: req.from_node,
-        to_node: req.to_node,
-    };
-
-    // Forward format as a query parameter to the backend
-    let url = match params.format.as_deref() {
-        Some(fmt) => format!("{}/query?format={fmt}", backend),
-        None => format!("{}/query", backend),
+    // Forward format and colors as query parameters to the backend
+    let mut query_parts: Vec<String> = Vec::new();
+    if let Some(ref fmt) = params.format {
+        query_parts.push(format!("format={fmt}"));
+    }
+    if params.colors.is_some() {
+        query_parts.push("colors".into());
+    }
+    let url = if query_parts.is_empty() {
+        format!("{}/query", backend)
+    } else {
+        format!("{}/query?{}", backend, query_parts.join("&"))
     };
 
     let resp = state
         .client
         .post(&url)
-        .json(&backend_req)
+        .header("content-type", "application/json")
+        .body(body)
         .send()
         .await
         .map_err(|e| {
@@ -99,17 +145,41 @@ pub async fn handle_query(
     }
 }
 
-/// GET /info?graph_type=normal — forward to the appropriate backend.
+/// GET /info?profile=car — forward to the appropriate backend.
+///
+/// When `profile` is omitted, defaults to the first profile alphabetically.
+///
+/// # Errors
+///
+/// - **400 Bad Request** — unknown profile
+/// - **502 Bad Gateway** — backend unreachable or returned invalid JSON
 pub async fn handle_info(
     State(state): State<GatewayState>,
     Query(params): Query<InfoQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let graph_type = params.graph_type.as_deref().unwrap_or("normal");
+    let default_profile;
+    let profile = match params.profile.as_deref() {
+        Some(p) => p,
+        None => {
+            default_profile = state
+                .available_profiles()
+                .into_iter()
+                .next()
+                .unwrap_or("car")
+                .to_string();
+            &default_profile
+        }
+    };
 
-    let backend = state.backend_url(graph_type).ok_or((
-        StatusCode::BAD_REQUEST,
-        Json(serde_json::json!({"error": format!("unknown graph_type: {}", graph_type)})),
-    ))?;
+    let backend = state.backend_url(profile).ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": format!("unknown profile: {}", profile),
+                "available_profiles": state.available_profiles(),
+            })),
+        )
+    })?;
 
     let resp = state
         .client
@@ -139,4 +209,20 @@ pub async fn handle_info(
     } else {
         Ok(Json(body))
     }
+}
+
+/// GET /profiles — list all available routing profiles.
+///
+/// Returns a JSON object with the sorted profile names. Useful for client
+/// discovery (e.g. populating a dropdown).
+///
+/// ```json
+/// { "profiles": ["car", "motorcycle"] }
+/// ```
+pub async fn handle_profiles(
+    State(state): State<GatewayState>,
+) -> Json<Value> {
+    Json(serde_json::json!({
+        "profiles": state.available_profiles(),
+    }))
 }

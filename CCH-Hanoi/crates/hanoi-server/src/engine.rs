@@ -47,7 +47,7 @@ pub fn run_normal(
 
         match msg {
             Ok(Some(qm)) => {
-                let resp = dispatch_normal(&mut engine, qm.request, qm.format.as_deref());
+                let resp = dispatch_normal(&mut engine, qm.request, qm.format.as_deref(), qm.colors);
                 let _ = qm.reply.send(resp);
             }
             Ok(None) => break, // Channel closed — shutdown
@@ -88,7 +88,7 @@ pub fn run_line_graph(
 
         match msg {
             Ok(Some(qm)) => {
-                let resp = dispatch_line_graph(&mut engine, qm.request, qm.format.as_deref());
+                let resp = dispatch_line_graph(&mut engine, qm.request, qm.format.as_deref(), qm.colors);
                 let _ = qm.reply.send(resp);
             }
             Ok(None) => break,
@@ -107,6 +107,7 @@ fn dispatch_normal(
     engine: &mut QueryEngine<'_>,
     req: QueryRequest,
     format: Option<&str>,
+    colors: bool,
 ) -> Result<Value, CoordRejection> {
     let answer = if let (Some(flat), Some(flng), Some(tlat), Some(tlng)) =
         (req.from_lat, req.from_lng, req.to_lat, req.to_lng)
@@ -129,13 +130,14 @@ fn dispatch_normal(
         None => tracing::info!("query returned no path"),
     }
 
-    Ok(format_response(answer, format))
+    Ok(format_response(answer, format, colors))
 }
 
 fn dispatch_line_graph(
     engine: &mut LineGraphQueryEngine<'_>,
     req: QueryRequest,
     format: Option<&str>,
+    colors: bool,
 ) -> Result<Value, CoordRejection> {
     let answer = if let (Some(flat), Some(flng), Some(tlat), Some(tlng)) =
         (req.from_lat, req.from_lng, req.to_lat, req.to_lng)
@@ -158,15 +160,16 @@ fn dispatch_line_graph(
         None => tracing::info!("query returned no path"),
     }
 
-    Ok(format_response(answer, format))
+    Ok(format_response(answer, format, colors))
 }
 
 /// Convert a query answer to the requested response format.
 /// Default (None) → GeoJSON Feature; `"json"` → plain JSON.
-fn format_response(answer: Option<QueryAnswer>, format: Option<&str>) -> Value {
+/// When `colors` is true and format is GeoJSON, adds simplestyle-spec properties.
+fn format_response(answer: Option<QueryAnswer>, format: Option<&str>, colors: bool) -> Value {
     match format {
         Some("json") => serde_json::to_value(answer_to_response(answer)).unwrap(),
-        _ => answer_to_geojson(answer),
+        _ => answer_to_geojson(answer, colors),
     }
 }
 
@@ -186,40 +189,59 @@ fn answer_to_response(answer: Option<QueryAnswer>) -> QueryResponse {
     }
 }
 
-/// Build a GeoJSON Feature with a LineString geometry from the query answer.
+/// Build a GeoJSON FeatureCollection with a LineString geometry from the query answer.
 ///
 /// Per RFC 7946, coordinates are [longitude, latitude] (note: reversed from
-/// our internal (lat, lng) convention).
-fn answer_to_geojson(answer: Option<QueryAnswer>) -> Value {
+/// our internal (lat, lng) convention).  Output is a FeatureCollection (matching
+/// the CLI's output format) for maximum tool compatibility.
+///
+/// When `colors` is true, adds simplestyle-spec visualization properties
+/// (stroke, stroke-width, fill, fill-opacity) to the Feature properties.
+fn answer_to_geojson(answer: Option<QueryAnswer>, colors: bool) -> Value {
     match answer {
         Some(a) => {
             // Convert (lat, lng) → [lng, lat] per GeoJSON spec
-            let coords: Vec<Value> = a
+            let coords: Vec<[f32; 2]> = a
                 .coordinates
                 .iter()
-                .map(|&(lat, lng)| serde_json::json!([lng, lat]))
+                .map(|&(lat, lng)| [lng, lat])
                 .collect();
 
+            let mut props = serde_json::json!({
+                "distance_ms": a.distance_ms,
+                "distance_m": a.distance_m
+            });
+            if colors {
+                let obj = props.as_object_mut().unwrap();
+                obj.insert("stroke".into(), serde_json::json!("#ff5500"));
+                obj.insert("stroke-width".into(), serde_json::json!(10));
+                obj.insert("fill".into(), serde_json::json!("#ffaa00"));
+                obj.insert("fill-opacity".into(), serde_json::json!(0.4));
+            }
+
             serde_json::json!({
-                "type": "Feature",
-                "geometry": {
-                    "type": "LineString",
-                    "coordinates": coords
-                },
-                "properties": {
-                    "distance_ms": a.distance_ms,
-                    "distance_m": a.distance_m
-                }
+                "type": "FeatureCollection",
+                "features": [{
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": coords
+                    },
+                    "properties": props
+                }]
             })
         }
         None => {
             serde_json::json!({
-                "type": "Feature",
-                "geometry": null,
-                "properties": {
-                    "distance_ms": null,
-                    "distance_m": null
-                }
+                "type": "FeatureCollection",
+                "features": [{
+                    "type": "Feature",
+                    "geometry": null,
+                    "properties": {
+                        "distance_ms": null,
+                        "distance_m": null
+                    }
+                }]
             })
         }
     }

@@ -18,11 +18,17 @@ pub struct QueryRequest {
     pub to_node: Option<u32>,
 }
 
-/// URL query-string parameter for response format: `/query?format=json`.
-/// Default (omitted) → GeoJSON; `format=json` → plain JSON response.
+/// URL query-string parameters controlling response format.
+///
+/// - `format`: omit → GeoJSON (default); `format=json` → plain JSON.
+/// - `colors`: presence (`?colors`) adds simplestyle-spec properties to GeoJSON.
+///   Ignored when `format=json`.
 #[derive(Deserialize)]
 pub struct FormatParam {
     pub format: Option<String>,
+    /// When present (any value or empty), adds simplestyle-spec visualization
+    /// properties (stroke, stroke-width, fill, fill-opacity) to GeoJSON output.
+    pub colors: Option<String>,
 }
 
 /// Query result returned as JSON.

@@ -1011,15 +1011,97 @@ Triangle relaxation for shortcut u──v via lower node x:
 Since the original graph is directed, the forward and backward costs of an
 undirected CCH edge can differ.
 
+#### Why the cross-pattern: downward + upward, upward + downward
+
+The formulas mix upward and downward weights, which can be confusing at first.
+The key is that the two-hop detour through `x` always **goes down then comes
+back up** in the elimination ordering — and the two legs necessarily use
+opposite weight arrays.
+
+Consider the three nodes with `rank(x) < rank(u) < rank(v)`. The CCH stores
+edges pointing low→high, so the stored edges are `x→u` and `x→v`. Each stored
+edge carries two weights: upward (the real-world cost from low to high) and
+downward (the real-world cost from high to low).
+
+**Relaxing upward_weight(u→v)** — the real-world path from u to v through x:
+
+```
+Real-world path:  u ──→ x ──→ v
+                    ↘       ↗
+              (go DOWN    (go UP
+              from u to x)  from x to v)
+
+    Step 1: u → x in the real world
+            u is higher than x, so this is going DOWN the ordering
+            → read downward_weight on edge x──u, written as downward_weight(u→x)
+
+    Step 2: x → v in the real world
+            x is lower than v, so this is going UP the ordering
+            → read upward_weight on edge x──v, written as upward_weight(x→v)
+
+    Total = downward_weight(u→x) + upward_weight(x→v)
+```
+
+**Relaxing downward_weight(u→v)** — the real-world path from v to u through x:
+
+```
+Real-world path:  v ──→ x ──→ u
+                    ↘       ↗
+              (go DOWN    (go UP
+              from v to x)  from x to u)
+
+    Step 1: v → x in the real world
+            v is higher than x, so this is going DOWN the ordering
+            → read downward_weight on edge x──v, written as downward_weight(x→v)
+
+    Step 2: x → u in the real world
+            x is lower than u, so this is going UP the ordering
+            → read upward_weight on edge x──u, written as upward_weight(u→x)
+
+    Total = downward_weight(x→v) + upward_weight(u→x)
+```
+
+The pattern is always: **down to the intermediate, then up to the destination**.
+This is not a coincidence — it's structural. The intermediate node `x` has the
+lowest rank in the triangle, so any path through it must descend to reach `x`
+and ascend to leave it.
+
+Summary table for the edge `u──v` (where `rank(x) < rank(u) < rank(v)`):
+
+```
+Weight being      Real-world  Leg 1        Leg 2         Formula
+relaxed           path        (down to x)  (up from x)
+────────────────  ──────────  ───────────  ────────────  ──────────────────────
+upward(u→v)       u → x → v  down(u→x)    up(x→v)      down(u→x) + up(x→v)
+downward(u→v)     v → x → u  down(x→v)    up(u→x)      up(u→x)   + down(x→v)
+```
+
 ### Why it works: the triangle inequality guarantee
 
 The chordal supergraph has a key property: for every pair of adjacent nodes `u`
 and `v`, **all** lower-ranked nodes that could be on a shortest path between
 them are connected to both `u` and `v` in the supergraph. This means:
 
-1. We only need to check triangles (not longer paths)
-2. Processing nodes in rank order guarantees that when we process node `x`,
-   all triangles through nodes of rank < rank(x) have already been relaxed
+1. **We only need to check triangles (not longer paths).** Suppose the true
+   shortest path from `u` to `v` goes through nodes `x₁, x₂, ..., xₖ`, all
+   with rank lower than both `u` and `v`. The chordal completion guarantees
+   that edges exist between every consecutive pair of these intermediate nodes
+   _and_ between each of them and `u`/`v`. This means the multi-hop path
+   `u → x₁ → x₂ → ... → xₖ → v` can be decomposed into a chain of triangles,
+   each of which is relaxed independently. The bottom-up processing order
+   ensures these compose correctly.
+
+2. **Bottom-up processing guarantees correctness.** When we process node `v`
+   (examine all triangles where `v` is the highest node), every edge between
+   nodes of rank < rank(v) already has its final weight. This is because those
+   edges were updated when their own highest-ranked endpoint was processed
+   earlier. So the weights we read from the two lower legs of the triangle are
+   already correct shortest-path distances — not intermediate approximations.
+
+3. **A single pass suffices.** Unlike Bellman-Ford (which needs multiple rounds),
+   CCH customization needs exactly one bottom-up pass. The elimination ordering
+   provides a topological guarantee: no triangle's lower edges depend on any
+   edge that hasn't been finalized yet.
 
 After processing all nodes, every shortcut edge has a weight equal to the
 shortest path it represents.
@@ -1216,38 +1298,66 @@ at each level, then synchronize at the separator above.
 
 To find the shortest path from `source` to `target`:
 
-1. Start at `source`, walk **up** the elimination tree
-2. Start at `target`, walk **up** the elimination tree
-3. Where the two walks **meet**, combine their distances
+1. Start at `source`, walk **up** the elimination tree to the root
+2. Start at `target`, walk **up** the elimination tree to the root
+3. **Both walks go all the way to the root** — they do NOT stop when they
+   first intersect
+4. After both walks finish, scan all nodes reached by both and pick the one
+   that minimizes `fw_dist[node] + bw_dist[node]`
 
-The walks relax edges in the chordal supergraph as they go — this is like
-Dijkstra, but guided by the tree structure instead of a priority queue.
+### Why not stop at the first intersection?
 
-### How the interleaved walk works
+Unlike Dijkstra's bidirectional search (which processes nodes in distance order
+and can stop at intersection), the CCH walk processes nodes in **rank order** —
+which has no relationship to distance. The first shared node is not necessarily
+on the shortest path.
+
+Consider this scenario:
 
 ```
-                          root
-                         ╱    ╲
-                       ...    ...
-                       │        │
-    forward walk →   [m]  ←  backward walk    ← meeting point!
-                     ╱  ╲
-                   ...   ...
-                   │       │
+              root
+             ╱    ╲
+           ...    ...
+           │        │
+    fw →  [m₁]     [m₂]  ← bw     m₁ is the first intersection,
+           │        │               but m₂ gives a shorter total!
+          ...      ...
+           │        │
+       [source]  [target]
+```
+
+The forward walk might reach `m₁` via a long detour (fw_dist[m₁] = 50), while
+a shorter route goes through `m₂` higher up (fw_dist[m₂] = 3, bw_dist[m₂] = 5,
+total = 8). If we stopped at `m₁`, we'd miss the optimal path through `m₂`.
+
+Walking to the root guarantees we consider **every** candidate meeting point.
+
+### How the walk works
+
+```
+                      root         ← both walks end here
+                     ╱    ╲
+                   ...    ...
+                   │        │
+  forward walk →  ...      ...  ←  backward walk
+                   │        │
                [source]  [target]
 
 Walk rules:
-  - Each walk follows parent pointers upward
-  - Whichever walk is at a LOWER rank goes next
-  - When both walks reach the SAME node:
-      tentative = fw_dist[node] + bw_dist[node]
-      if tentative < best: update best
-  - Continue past meeting point (there might be a better one higher up)
+  - Each walk follows parent pointers upward to the root
+  - At each node visited, relax edges to ALL upward neighbors
+    (not just the parent — all neighbors with higher rank)
+  - Track tentative best: whenever a node has been reached by
+    BOTH walks, check if fw_dist[node] + bw_dist[node] < best
+  - The walk does NOT stop at the first meeting — continue to root
+  - After both walks finish, the best tentative distance is the answer
 ```
 
 ### Edge relaxation during the walk
 
-At each node the walk visits, it relaxes edges to all upward neighbors:
+At each node the walk visits, it relaxes edges to **all** upward neighbors in
+the chordal supergraph — not just the tree parent. The tree guides the order of
+nodes visited, but the relaxation uses the full chordal supergraph adjacency:
 
 ```
 Forward walk at node v:
@@ -1259,13 +1369,19 @@ Backward walk at node v:
       bw_dist[w] = min(bw_dist[w], bw_dist[v] + downward_weight(v→w))
 ```
 
+Note: the backward walk reads **downward** weights. This is because walking
+"up" the tree from the target means traversing edges in reverse — what costs
+`downward_weight` in the real-world direction (high → low) is what the backward
+search needs.
+
 ### Why this is fast
 
 - The elimination tree has depth O(log n) for planar graphs
 - Each walk visits O(log n) nodes
-- At each node, it relaxes O(degree) edges
+- At each node, it relaxes O(degree) edges in the chordal supergraph
 - Total: O(degree × log n) work per query
 - In practice: a few hundred edge relaxations → sub-millisecond
+- No priority queue needed — just follow parent pointers upward
 
 ### Concrete query: A → H (using our 8-node graph)
 
@@ -1327,15 +1443,18 @@ Elimination tree (for reference):
   Visit E(7):  root. Done.
 ```
 
-**Meeting points** (both walks visited these nodes):
+**Both walks reached the root E(7).** Now scan every node visited by both:
 
 ```
-  Node  fw_dist  bw_dist  Total
-  ────  ───────  ───────  ─────
-  H       22       0       22
-  C        2      11       13
-  E        4       8       12  ★ best
+  Node  fw_dist  bw_dist  Total  Why not optimal?
+  ────  ───────  ───────  ─────  ────────────────────────────────
+  H       22       0       22   Forward took a long detour via G
+  C        2      11       13   Backward path C→H is expensive
+  E        4       8       12   ★ best meeting point
 ```
+
+If we had stopped at H (the first node reached by both walks), we would have
+reported distance 22 — nearly double the true shortest path of 12.
 
 **Shortest distance A→H = 12.**
 

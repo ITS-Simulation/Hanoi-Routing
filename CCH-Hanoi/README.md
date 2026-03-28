@@ -565,60 +565,87 @@ hanoi_server --graph-dir Maps/data/hanoi_car/graph --log-format tree
 ## 7. hanoi-gateway — API Gateway
 
 The gateway provides a unified entry point that routes queries to the
-appropriate backend (normal or line graph) based on the request's `graph_type`
-field.
+appropriate backend based on the request's **routing profile** (e.g. `car`,
+`motorcycle`). All backend configuration is defined in a YAML config file.
 
 ### 7.1 Starting the Gateway
 
 ```bash
-hanoi_gateway \
-  --port 50051 \
-  --normal-backend http://localhost:8080 \
-  --line-graph-backend http://localhost:8081 \
-  --backend-timeout-secs 30
+hanoi_gateway --config gateway.yaml
+hanoi_gateway --config gateway.yaml --port 9000   # override port
 ```
 
 ### 7.2 CLI Arguments
 
+| Argument   | Default          | Description                                  |
+| ---------- | ---------------- | -------------------------------------------- |
+| `--config` | `gateway.yaml`   | Path to the YAML config file                 |
+| `--port`   | (from config)    | Override the port defined in the config file  |
 
-| Argument                 | Default                 | Description                    |
-| ------------------------ | ----------------------- | ------------------------------ |
-| `--port`                 | `50051`                 | Gateway listening port         |
-| `--normal-backend`       | `http://localhost:8080` | Normal graph server URL        |
-| `--line-graph-backend`   | `http://localhost:8081` | Line graph server URL          |
-| `--backend-timeout-secs` | `30`                    | Request timeout (0 = disabled) |
-| `--log-format`           | `pretty`                | Log format (pretty, compact, full, tree, json) |
-| `--log-file`             | (none)                  | Also write logs to file in JSON format (dual: stderr + file) |
+### 7.3 YAML Configuration
 
-**Logging to file** — concurrent output to stderr and file:
+The YAML config file is the **single source of truth** for the gateway. It
+controls the listen port, backend timeout, logging, and — most importantly —
+the set of routing profiles and their backend URLs.
 
-When `--log-file` is specified, logs are written to **both** stderr and the file simultaneously.
-Stderr output uses the selected `--log-format` (with ANSI colors for terminals).
-File output is always **JSON** (newline-delimited), which is machine-readable, `jq`-parseable,
-and immune to ANSI escape code contamination:
+```yaml
+port: 50051
+backend_timeout_secs: 30       # 0 to disable; default 30
+log_format: pretty             # pretty | full | compact | tree | json
+# log_file: /var/log/gw.json  # omit to disable file logging
 
-```bash
-# Logs appear on stderr (with colors, pretty format) AND in gateway.log (JSON)
-hanoi_gateway --port 50051 \
-  --normal-backend http://localhost:8080 \
-  --line-graph-backend http://localhost:8081 \
-  --log-file gateway.log
-
-# --log-format only affects stderr; file is always JSON
-hanoi_gateway --port 50051 \
-  --log-format compact \
-  --log-file gateway.log
-
-# Parse the JSON log file with jq
-jq 'select(.fields.message | contains("ready"))' gateway.log
+profiles:
+  car:
+    backend_url: "http://localhost:8080"
+  motorcycle:
+    backend_url: "http://localhost:8081"
 ```
 
-### 7.3 Routing Architecture
+**Config fields:**
+
+| Field                 | Required | Default  | Description                                         |
+| --------------------- | -------- | -------- | --------------------------------------------------- |
+| `port`                | yes      | —        | Gateway listen port                                 |
+| `backend_timeout_secs`| no       | `30`     | HTTP client timeout for backend requests (0 = none) |
+| `log_format`          | no       | `pretty` | Log output format: pretty, full, compact, tree, json|
+| `log_file`            | no       | (none)   | Also write logs to file in JSON format              |
+| `profiles`            | yes      | —        | Map of profile name → backend config (≥ 1 entry)   |
+| `profiles.<name>.backend_url` | yes | —   | Base URL of the backend routing server              |
+
+The gateway does not care whether a backend uses a normal graph or line graph —
+that is the backend's concern. This decouples the gateway API from graph
+topology details. Adding a new profile (e.g. `truck`, `bicycle`) only requires
+a new entry in the YAML and a running backend server.
+
+**Logging to file** — when `log_file` is set, logs are written to **both**
+stderr and the file simultaneously. Stderr uses `log_format`; the file is
+always newline-delimited JSON:
+
+```bash
+# Parse the JSON log file with jq
+jq 'select(.fields.message | contains("ready"))' /var/log/gw.json
+```
+
+### 7.4 Gateway Endpoints
+
+| Method | Path        | Description                                                 |
+| ------ | ----------- | ----------------------------------------------------------- |
+| POST   | `/query`    | Route query — `?profile=<name>` selects the backend         |
+| GET    | `/info`     | Backend metadata — `?profile=<name>` (optional)             |
+| GET    | `/profiles` | List all available routing profiles                         |
+
+`GET /profiles` response:
+
+```json
+{ "profiles": ["car", "motorcycle"] }
+```
+
+### 7.5 Routing Architecture
 
 ```
              Client
                │
-       POST /query  {"graph_type": "line_graph", ...}
+       POST /query?profile=car  {...}
                │
                ▼
         ┌─────────────┐
@@ -626,14 +653,14 @@ jq 'select(.fields.message | contains("ready"))' gateway.log
         │   (:50051)   │
         └──┬───────┬───┘
            │       │
-  graph_type       graph_type
-  ="normal"        ="line_graph"
+   profile         profile
+   ="car"          ="motorcycle"
            │       │
            ▼       ▼
      ┌─────────┐ ┌─────────┐
      │ Server  │ │ Server  │
      │ :8080   │ │ :8081   │
-     │ (normal)│ │ (line)  │
+     │  (car)  │ │ (moto)  │
      └─────────┘ └─────────┘
 ```
 
@@ -643,11 +670,20 @@ jq 'select(.fields.message | contains("ready"))' gateway.log
 goes directly from the pipeline to each server's customize port. Health/ready
 checks are done by orchestration tools directly against each backend.
 
-### 7.4 Error Propagation
+### 7.6 Error Propagation
 
 The gateway preserves backend HTTP status codes. If the backend returns 400
 (e.g., coordinate validation failure) or 500, the gateway forwards that exact
 status and JSON body to the client.
+
+Unknown profiles return HTTP 400 with the list of valid options:
+
+```json
+{
+  "error": "unknown profile: truck",
+  "available_profiles": ["car", "motorcycle"]
+}
+```
 
 ---
 
@@ -1037,7 +1073,7 @@ bench_report --baseline run1.json --current run2.json
 
 **Request (coordinate-based)**:
 
-`POST /query` (default: GeoJSON response) or `POST /query?format=json` (plain JSON).
+`POST /query` (default: GeoJSON) | `POST /query?format=json` (plain JSON) | `POST /query?colors` (GeoJSON with simplestyle-spec colors).
 
 ```json
 {
@@ -1057,11 +1093,13 @@ bench_report --baseline run1.json --current run2.json
 }
 ```
 
-**Request via gateway** (adds `graph_type`):
+**Request via gateway** (profile in query param):
 
-```json
+```
+POST /query?profile=car
+Content-Type: application/json
+
 {
-  "graph_type": "line_graph",
   "from_lat": 21.028,
   "from_lng": 105.834,
   "to_lat": 21.006,
@@ -1073,15 +1111,18 @@ bench_report --baseline run1.json --current run2.json
 
 ```json
 {
-  "type": "Feature",
-  "geometry": {
-    "type": "LineString",
-    "coordinates": [[105.834, 21.028], [105.836, 21.025], ...]
-  },
-  "properties": {
-    "distance_ms": 142300,
-    "distance_m": 3842.7
-  }
+  "type": "FeatureCollection",
+  "features": [{
+    "type": "Feature",
+    "geometry": {
+      "type": "LineString",
+      "coordinates": [[105.834, 21.028], [105.836, 21.025], ...]
+    },
+    "properties": {
+      "distance_ms": 142300,
+      "distance_m": 3842.7
+    }
+  }]
 }
 ```
 
@@ -1190,7 +1231,7 @@ from `true` to `false`.
 }
 ```
 
-Via gateway: `GET /info?graph_type=line_graph`
+Via gateway: `GET /info?profile=car`
 
 ### 11.4 GET /health — Operational Metrics
 
@@ -1428,9 +1469,9 @@ curl -s http://localhost:8080/health | python3 -m json.tool
 
 **What to verify**:
 
-- Response is a GeoJSON Feature with `"type": "Feature"` and `"geometry"` / `"properties"`
-- `properties.distance_ms` > 0 (route exists)
-- `geometry.coordinates` is non-empty with `[lng, lat]` pairs (RFC 7946 order)
+- Response is a GeoJSON FeatureCollection with a single Feature
+- `features[0].properties.distance_ms` > 0 (route exists)
+- `features[0].geometry.coordinates` is non-empty with `[lng, lat]` pairs (RFC 7946 order)
 - All coordinates are within the Hanoi bounding box
 - `GET /info` returns correct `num_nodes` and `num_edges`
 - `GET /ready` returns `{"ready": true}`
@@ -1537,37 +1578,34 @@ print("Re-customization validation passed: different weights → different route
 hanoi_server --graph-dir Maps/data/hanoi_car/graph \
   --query-port 8080 --customize-port 9080 &
 
-hanoi_server --graph-dir Maps/data/hanoi_car/line_graph \
-  --original-graph-dir Maps/data/hanoi_car/graph \
-  --query-port 8081 --customize-port 9081 --line-graph &
+hanoi_server --graph-dir Maps/data/hanoi_motorcycle/graph \
+  --query-port 8081 --customize-port 9081 &
 
-# Start gateway
-hanoi_gateway \
-  --port 50051 \
-  --normal-backend http://localhost:8080 \
-  --line-graph-backend http://localhost:8081 &
+# Start gateway with config
+hanoi_gateway --config gateway.yaml &
 
-# Query via gateway — normal mode
-curl -s -X POST http://localhost:50051/query \
+# List available profiles
+curl -s http://localhost:50051/profiles | python3 -m json.tool
+
+# Query via gateway — car profile
+curl -s -X POST "http://localhost:50051/query?profile=car" \
   -H "Content-Type: application/json" \
   -d '{
-    "graph_type": "normal",
     "from_lat": 21.028, "from_lng": 105.834,
     "to_lat": 21.006, "to_lng": 105.843
   }' | python3 -m json.tool
 
-# Query via gateway — line graph mode
-curl -s -X POST http://localhost:50051/query \
+# Query via gateway — motorcycle profile
+curl -s -X POST "http://localhost:50051/query?profile=motorcycle" \
   -H "Content-Type: application/json" \
   -d '{
-    "graph_type": "line_graph",
     "from_lat": 21.028, "from_lng": 105.834,
     "to_lat": 21.006, "to_lng": 105.843
   }' | python3 -m json.tool
 
 # Info via gateway
-curl -s "http://localhost:50051/info?graph_type=normal" | python3 -m json.tool
-curl -s "http://localhost:50051/info?graph_type=line_graph" | python3 -m json.tool
+curl -s "http://localhost:50051/info?profile=car" | python3 -m json.tool
+curl -s "http://localhost:50051/info?profile=motorcycle" | python3 -m json.tool
 ```
 
 ### 13.6 Testing Response Formats
@@ -1588,10 +1626,19 @@ curl -s -X POST "http://localhost:8080/query?format=json" \
     "from_lat": 21.028, "from_lng": 105.834,
     "to_lat": 21.006, "to_lng": 105.843
   }' | python3 -m json.tool
+
+# GeoJSON with simplestyle-spec color properties
+curl -s -X POST "http://localhost:8080/query?colors" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from_lat": 21.028, "from_lng": 105.834,
+    "to_lat": 21.006, "to_lng": 105.843
+  }' | python3 -m json.tool
 ```
 
 **Verify**: Default response has `geometry.coordinates` with `[longitude, latitude]` order
 (RFC 7946). `?format=json` returns flat `distance_ms`/`coordinates` fields.
+`?colors` adds `stroke`, `stroke-width`, `fill`, `fill-opacity` to GeoJSON properties.
 
 ### 13.7 Testing Error Cases
 
@@ -1613,11 +1660,11 @@ echo "invalid" | curl -X POST http://localhost:9080/customize \
   --data-binary @- -H "Content-Type: application/octet-stream"
 # → 400 with size mismatch error
 
-# Unknown graph_type via gateway
-curl -s -X POST http://localhost:50051/query \
+# Unknown profile via gateway
+curl -s -X POST "http://localhost:50051/query?profile=unknown" \
   -H "Content-Type: application/json" \
-  -d '{"graph_type": "unknown", "from_lat": 21.028, "from_lng": 105.834, "to_lat": 21.006, "to_lng": 105.843}'
-# → 400 with unknown graph_type error
+  -d '{"from_lat": 21.028, "from_lng": 105.834, "to_lat": 21.006, "to_lng": 105.843}'
+# → 400 with unknown profile error and available_profiles list
 ```
 
 ### 13.8 Performance Benchmarks During Testing
@@ -1657,7 +1704,7 @@ bench_report --baseline baseline.json --current current.json --threshold 10
 | Re-customization works                | Upload multiple weight sets                                               | Different results per set  |
 | Coordinate validation rejects invalid | `curl` with bad coords                                                    | 400 error                  |
 | Weight validation rejects INFINITY    | Upload weights with >= 2^31/2                                             | 400 error                  |
-| Gateway routes correctly              | `curl POST /query {"graph_type": "..."}`                                  | Routes to correct backend  |
+| Gateway routes correctly              | `curl POST /query?profile=car`                                            | Routes to correct backend  |
 | GeoJSON format correct (default)      | `curl POST /query` (no query param)                                       | Valid GeoJSON Feature      |
 | JSON format via query param           | `curl POST /query?format=json`                                            | Flat JSON response         |
 | Graceful shutdown                     | Send SIGTERM to server                                                    | Clean exit within 30s      |
@@ -1815,13 +1862,13 @@ internal data pipeline pushing weights directly to each server's customize port.
               │   (hanoi_gateway)   │                   │
               └──────┬─────┬────────┘                   │ Vertical bar:
                      │     │                            │ external query
-        graph_type   │     │  graph_type                │ traffic
-        ="normal"    │     │  ="line_graph"             │
+        profile      │     │  profile                   │ traffic
+        ="car"       │     │  ="motorcycle"             │
                      │     │                            │
                      ▼     ▼                           ─┘
            ┌──────────┐  ┌──────────┐
            │ Server A  │  │ Server B  │
-           │ (normal)  │  │ (line_gr) │
+           │  (car)    │  │  (moto)   │
            │ :8080     │  │ :8081     │
            │ :9080     │  │ :9081     │
            └─────┬─────┘  └─────┬─────┘
@@ -1897,7 +1944,7 @@ section describes the intended integrated architecture.
            POST /customize :9080                 POST /customize :9081
            ┌──────────────────┐                  ┌──────────────────┐
            │   Server A       │                  │   Server B       │
-           │   (normal graph) │                  │   (line graph)   │
+           │   (car)          │                  │   (motorcycle)   │
            │                  │                  │                  │
            │   CCH Phase 2:   │                  │   CCH Phase 2:   │
            │   re-customize   │                  │   re-customize   │

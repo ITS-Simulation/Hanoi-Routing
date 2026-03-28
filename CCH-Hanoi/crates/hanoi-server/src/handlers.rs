@@ -24,6 +24,7 @@ pub async fn handle_query(
     let msg = QueryMsg {
         request: req,
         format: params.format,
+        colors: params.colors.is_some(),
         reply: tx,
     };
 

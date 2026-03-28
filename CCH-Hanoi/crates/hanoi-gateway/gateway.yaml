@@ -1,0 +1,13 @@
+# Hanoi Gateway configuration.
+# See CCH-Hanoi/README.md § 7 for full documentation.
+
+port: 50051
+backend_timeout_secs: 30
+log_format: pretty
+# log_file: /var/log/hanoi-gateway.json
+
+profiles:
+  car:
+    backend_url: "http://localhost:8080"
+  motorcycle:
+    backend_url: "http://localhost:8081"

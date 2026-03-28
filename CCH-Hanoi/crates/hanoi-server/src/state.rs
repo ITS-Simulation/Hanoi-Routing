@@ -14,6 +14,8 @@ pub struct QueryMsg {
     /// Response format from the URL query string (`?format=json`).
     /// `None` → GeoJSON (default), `Some("json")` → plain JSON.
     pub format: Option<String>,
+    /// Whether to include simplestyle-spec color properties in GeoJSON output.
+    pub colors: bool,
     pub reply: tokio::sync::oneshot::Sender<Result<serde_json::Value, CoordRejection>>,
 }
 

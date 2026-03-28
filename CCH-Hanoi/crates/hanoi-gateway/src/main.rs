@@ -1,3 +1,4 @@
+mod config;
 mod proxy;
 mod types;
 
@@ -6,62 +7,36 @@ use std::path::PathBuf;
 
 use axum::Router;
 use axum::routing::{get, post};
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
+use crate::config::{GatewayConfig, LogFormat};
 use crate::proxy::GatewayState;
 
 // ---------------------------------------------------------------------------
 // CLI arguments
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Default, ValueEnum)]
-enum LogFormat {
-    /// Multi-line, colorized, with source locations (most readable)
-    #[default]
-    Pretty,
-    /// Single-line with inline span context
-    Full,
-    /// Abbreviated single-line
-    Compact,
-    /// Indented tree hierarchy (falls back to full)
-    Tree,
-    /// Newline-delimited JSON for log aggregation
-    Json,
-}
-
 #[derive(Parser)]
 #[command(
     name = "hanoi_gateway",
-    about = "API gateway for Hanoi routing servers (query/info only)"
+    about = "Profile-based API gateway for Hanoi routing servers",
+    long_about = "\
+Profile-based API gateway for Hanoi routing servers.\n\n\
+All backend configuration is read from a YAML config file.\n\
+See gateway.yaml for the expected format."
 )]
 struct Args {
-    /// Gateway port
-    #[arg(long, default_value = "50051")]
-    port: u16,
+    /// Path to the gateway YAML config file.
+    #[arg(long, default_value = "gateway.yaml")]
+    config: PathBuf,
 
-    /// Normal graph server query endpoint (e.g. http://localhost:8080)
-    #[arg(long, default_value = "http://localhost:8080")]
-    normal_backend: String,
-
-    /// Line graph server query endpoint (e.g. http://localhost:8081)
-    #[arg(long, default_value = "http://localhost:8081")]
-    line_graph_backend: String,
-
-    /// Backend request timeout in seconds. Set to 0 to disable.
-    #[arg(long, default_value = "30")]
-    backend_timeout_secs: u64,
-
-    /// Log output format
-    #[arg(long, value_enum, default_value_t = LogFormat::Pretty)]
-    log_format: LogFormat,
-
-    /// Also write logs to file in JSON format (logs go to both stderr and file)
-    #[arg(long, value_name = "PATH")]
-    log_file: Option<PathBuf>,
+    /// Override the port from the config file.
+    #[arg(long)]
+    port: Option<u16>,
 }
 
 // ---------------------------------------------------------------------------
@@ -70,7 +45,7 @@ struct Args {
 
 /// Initialize tracing. Returns an optional `WorkerGuard` that **must** be held
 /// alive for the program's lifetime — dropping it closes the file writer.
-fn init_tracing(log_format: &LogFormat, log_file: Option<&PathBuf>) -> Option<WorkerGuard> {
+fn init_tracing(log_format: &LogFormat, log_file: Option<&str>) -> Option<WorkerGuard> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     // Optional file writer (non-blocking with no ANSI codes)
@@ -145,26 +120,43 @@ fn init_tracing(log_format: &LogFormat, log_file: Option<&PathBuf>) -> Option<Wo
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-    let _guard = init_tracing(&args.log_format, args.log_file.as_ref());
 
-    let state = GatewayState::new(
-        &args.normal_backend,
-        &args.line_graph_backend,
-        args.backend_timeout_secs,
-    );
+    let config = GatewayConfig::load(&args.config).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    });
+
+    let _guard = init_tracing(&config.log_format, config.log_file.as_deref());
+
+    // CLI --port overrides config file
+    let port = args.port.unwrap_or(config.port);
+
+    let profile_names: Vec<&str> = {
+        let mut names: Vec<&str> = config.profiles.keys().map(|s| s.as_str()).collect();
+        names.sort_unstable();
+        names
+    };
+
+    let state = GatewayState::new(config.profiles, config.backend_timeout_secs);
 
     let router = Router::new()
         .route("/query", post(proxy::handle_query))
         .route("/info", get(proxy::handle_info))
+        .route("/profiles", get(proxy::handle_profiles))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr)
         .await
         .expect("failed to bind gateway port");
 
-    tracing::info!(%addr, %args.normal_backend, %args.line_graph_backend, "gateway ready");
+    tracing::info!(
+        %addr,
+        profiles = ?profile_names,
+        config_file = %args.config.display(),
+        "gateway ready"
+    );
 
     axum::serve(listener, router).await.unwrap();
 }
