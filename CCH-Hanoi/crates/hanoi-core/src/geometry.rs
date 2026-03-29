@@ -1,10 +1,8 @@
-use rust_road_router::datastr::graph::NodeId;
+use rust_road_router::datastr::graph::{EdgeId, NodeId};
 use serde::Serialize;
 
 const STRAIGHT_THRESHOLD_DEG: f64 = 25.0;
 const U_TURN_THRESHOLD_DEG: f64 = 155.0;
-const S_CURVE_NET_THRESHOLD_DEG: f64 = 15.0;
-const S_CURVE_MAX_THRESHOLD_DEG: f64 = 60.0;
 
 /// Classification of a turn maneuver at an intersection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -23,16 +21,20 @@ pub struct TurnAnnotation {
     pub direction: TurnDirection,
 
     /// Signed turn angle in degrees. Positive = left, negative = right.
-    /// Range: [-180, 180]. For merged straights, this is the cumulative sum.
+    /// Range: [-180, 180].
     pub angle_degrees: f64,
 
-    /// Number of original line-graph transitions this entry spans.
-    pub edge_count: u32,
-
     /// Index into the output `coordinates[]` array where this maneuver occurs.
-    /// For a turn, this is the intersection node. For a merged straight, this
-    /// is the last intersection in the straight run.
+    #[serde(skip)]
     pub coordinate_index: u32,
+
+    /// Distance in meters from this maneuver to the next maneuver (or to the
+    /// route end for the last entry).
+    pub distance_to_next_m: f64,
+
+    /// Degree of the intersection node in the original graph (outgoing edges).
+    #[serde(skip)]
+    pub intersection_degree: u32,
 }
 
 /// Compute the signed turn angle between segment A (`tail_a -> head_a`) and
@@ -85,13 +87,16 @@ pub fn classify_turn(angle_degrees: f64, cross: f64) -> TurnDirection {
     }
 }
 
-/// Compute turn annotations for a line-graph path.
+/// Compute raw turn annotations for a line-graph path.
 ///
 /// Each entry corresponds to one transition from `lg_path[i]` to `lg_path[i+1]`.
+/// `original_first_out` is the CSR offset array of the original graph, used to
+/// compute the intersection node degree.
 pub fn compute_turns(
     lg_path: &[NodeId],
     original_tail: &[NodeId],
     original_head: &[NodeId],
+    original_first_out: &[EdgeId],
     original_lat: &[f32],
     original_lng: &[f32],
 ) -> Vec<TurnAnnotation> {
@@ -106,13 +111,9 @@ pub fn compute_turns(
         let head_b = original_head[edge_b];
 
         debug_assert_eq!(
-            head_a,
-            original_tail[edge_b],
+            head_a, original_tail[edge_b],
             "line graph invariant violated: edge {} head ({}) != edge {} tail ({})",
-            edge_a,
-            head_a,
-            edge_b,
-            original_tail[edge_b]
+            edge_a, head_a, edge_b, original_tail[edge_b]
         );
 
         let (angle_radians, cross) =
@@ -120,111 +121,18 @@ pub fn compute_turns(
         let angle_degrees = angle_radians.to_degrees();
         let direction = classify_turn(angle_degrees, cross);
 
+        // Outgoing degree of the shared intersection node (head_a).
+        let node = head_a as usize;
+        let intersection_degree = original_first_out[node + 1] - original_first_out[node];
+
         turns.push(TurnAnnotation {
             direction,
             angle_degrees,
-            edge_count: 1,
-            coordinate_index: 0, // placeholder — assigned by merge_straights
+            coordinate_index: (i + 1) as u32,
+            distance_to_next_m: 0.0,
+            intersection_degree,
         });
     }
 
     turns
-}
-
-/// Pass 1: Replace adjacent opposite-sign turn pairs that are geometric
-/// artifacts with a single straight carrying the residual angle.
-///
-/// A pair is cancelled when:
-/// - Both entries are non-straight
-/// - They have opposite signs (one left, one right)
-/// - The net residual angle is below `S_CURVE_NET_THRESHOLD_DEG` (15°)
-/// - Neither individual angle exceeds `S_CURVE_MAX_THRESHOLD_DEG` (60°)
-pub fn cancel_s_curves(turns: Vec<TurnAnnotation>) -> Vec<TurnAnnotation> {
-    if turns.len() < 2 {
-        return turns;
-    }
-
-    let mut result = Vec::with_capacity(turns.len());
-    let mut i = 0;
-
-    while i < turns.len() - 1 {
-        let a = &turns[i];
-        let b = &turns[i + 1];
-
-        let both_non_straight = a.direction != TurnDirection::Straight && b.direction != TurnDirection::Straight;
-        let opposite_signs = a.angle_degrees * b.angle_degrees < 0.0;
-        let net = a.angle_degrees + b.angle_degrees;
-        let max_individual = a.angle_degrees.abs().max(b.angle_degrees.abs());
-
-        if both_non_straight
-            && opposite_signs
-            && net.abs() < S_CURVE_NET_THRESHOLD_DEG
-            && max_individual < S_CURVE_MAX_THRESHOLD_DEG
-        {
-            result.push(TurnAnnotation {
-                direction: TurnDirection::Straight,
-                angle_degrees: net,
-                edge_count: 2,
-                coordinate_index: 0, // placeholder — assigned by merge_straights
-            });
-            i += 2; // skip the consumed pair
-        } else {
-            result.push(turns[i].clone());
-            i += 1;
-        }
-    }
-
-    // Emit final element if not consumed by a pair cancellation
-    if i < turns.len() {
-        result.push(turns[i].clone());
-    }
-
-    result
-}
-
-/// Pass 2: Collapse consecutive straight entries into a single entry with
-/// cumulative angle and edge count. Assigns `coordinate_index` to every entry.
-pub fn merge_straights(turns: Vec<TurnAnnotation>) -> Vec<TurnAnnotation> {
-    let mut result = Vec::new();
-    let mut i = 0;
-    let mut raw_index: u32 = 0;
-
-    while i < turns.len() {
-        if turns[i].direction == TurnDirection::Straight {
-            // Start a merge run
-            let mut cumulative_angle = 0.0_f64;
-            let mut total_edges = 0_u32;
-
-            while i < turns.len() && turns[i].direction == TurnDirection::Straight {
-                cumulative_angle += turns[i].angle_degrees;
-                total_edges += turns[i].edge_count;
-                i += 1;
-            }
-
-            raw_index += total_edges;
-            result.push(TurnAnnotation {
-                direction: TurnDirection::Straight,
-                angle_degrees: cumulative_angle,
-                edge_count: total_edges,
-                coordinate_index: raw_index,
-            });
-        } else {
-            // Non-straight turn — emit as-is with its coordinate_index
-            raw_index += turns[i].edge_count;
-            result.push(TurnAnnotation {
-                direction: turns[i].direction,
-                angle_degrees: turns[i].angle_degrees,
-                edge_count: turns[i].edge_count,
-                coordinate_index: raw_index,
-            });
-            i += 1;
-        }
-    }
-
-    result
-}
-
-/// Convenience wrapper: chains S-curve cancellation then straight merging.
-pub fn refine_turns(turns: Vec<TurnAnnotation>) -> Vec<TurnAnnotation> {
-    merge_straights(cancel_s_curves(turns))
 }

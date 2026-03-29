@@ -11,7 +11,7 @@ use rust_road_router::io::Load;
 use crate::bounds::{BoundingBox, CoordRejection, ValidationConfig};
 use crate::geometry::TurnAnnotation;
 use crate::graph::GraphData;
-use crate::spatial::SpatialIndex;
+use crate::spatial::{SNAP_MAX_CANDIDATES, SpatialIndex};
 
 /// Answer from a shortest-path query.
 pub struct QueryAnswer {
@@ -172,9 +172,7 @@ impl<'a> QueryEngine<'a> {
         }
     }
 
-    /// Query by coordinates. Snaps to nearest edge, uses the projection parameter
-    /// `t` to pick the nearest endpoint, then runs a single CCH query.
-    /// Falls back to the other endpoint pair if the primary query finds no path.
+    /// Query by coordinates using ranked snap candidates in the original graph.
     #[tracing::instrument(skip(self), fields(
         from_lat = from.0, from_lng = from.1,
         to_lat = to.0, to_lng = to.1
@@ -184,39 +182,41 @@ impl<'a> QueryEngine<'a> {
         from: (f32, f32),
         to: (f32, f32),
     ) -> Result<Option<QueryAnswer>, CoordRejection> {
-        let src = self
-            .spatial
-            .validated_snap("origin", from.0, from.1, &self.validation_config)?;
-        let dst =
-            self.spatial
-                .validated_snap("destination", to.0, to.1, &self.validation_config)?;
+        let src_snaps = self.spatial.validated_snap_candidates(
+            "origin",
+            from.0,
+            from.1,
+            &self.validation_config,
+            SNAP_MAX_CANDIDATES,
+        )?;
+        let dst_snaps = self.spatial.validated_snap_candidates(
+            "destination",
+            to.0,
+            to.1,
+            &self.validation_config,
+            SNAP_MAX_CANDIDATES,
+        )?;
 
-        // Primary: route from the nearest endpoint of each snapped edge
-        let s = src.nearest_node();
-        let d = dst.nearest_node();
-        if let Some(answer) = self.query(s, d) {
-            return Ok(Some(Self::patch_coordinates(answer, from, to)));
-        }
-
-        // Fallback: try all 4 endpoint combinations (handles disconnected components,
-        // one-way streets where the nearest node is unreachable, etc.)
-        let src_nodes = [src.tail, src.head];
-        let dst_nodes = [dst.tail, dst.head];
         let mut best: Option<QueryAnswer> = None;
 
-        for &sn in &src_nodes {
-            for &dn in &dst_nodes {
-                if sn == s && dn == d {
-                    continue; // Already tried this pair
-                }
-                if let Some(answer) = self.query(sn, dn) {
+        for src in &src_snaps {
+            for dst in &dst_snaps {
+                let s = src.nearest_node();
+                let d = dst.nearest_node();
+
+                if let Some(answer) = self.query(s, d) {
                     let is_better = best
                         .as_ref()
                         .map_or(true, |b| answer.distance_ms < b.distance_ms);
                     if is_better {
                         best = Some(answer);
                     }
+                    break;
                 }
+            }
+
+            if best.is_some() {
+                break;
             }
         }
 

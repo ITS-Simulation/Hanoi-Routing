@@ -1,0 +1,133 @@
+@queryURL = localhost:8081/query?colors
+@filePath = res/hanoi_motorcycle_res
+@fileFormat = geojson
+
+POST {{queryURL}}
+Content-Type: application/json
+
+{
+  "from_lat": 21.03835,
+  "from_lng": 105.78310,
+  "to_lat": 20.887784,
+  "to_lng": 105.775691
+}
+
+>>! {{filePath}}_1.{{fileFormat}}
+###
+
+POST {{queryURL}}
+Content-Type: application/json
+
+{
+  "from_lat": 21.03162,
+  "from_lng": 105.75407,
+  "to_lat": 20.932040,
+  "to_lng": 105.843529
+}
+
+>>! {{filePath}}_2.{{fileFormat}}
+###
+
+POST {{queryURL}}
+Content-Type: application/json
+
+{
+  "from_lat": 21.07692,
+  "from_lng": 105.81305,
+  "to_lat": 20.989024,
+  "to_lng": 105.852828
+}
+
+>>! {{filePath}}_3.{{fileFormat}}
+###
+
+POST {{queryURL}}
+Content-Type: application/json
+
+{
+  "from_lat": 21.02940,
+  "from_lng": 105.88712,
+  "to_lat": 20.99599,
+  "to_lng": 105.80804
+}
+
+>>! {{filePath}}_4.{{fileFormat}}
+###
+
+POST {{queryURL}}
+Content-Type: application/json
+
+{
+  "from_lat": 21.17083,
+  "from_lng": 105.83937,
+  "to_lat": 20.96225,
+  "to_lng": 105.79178
+}
+
+>>! {{filePath}}_5.{{fileFormat}}
+###
+
+POST {{queryURL}}
+Content-Type: application/json
+
+{
+  "from_lat": 21.01320,
+  "from_lng": 105.94399,
+  "to_lat": 20.99694,
+  "to_lng": 105.79804
+}
+
+>>! {{filePath}}_6.{{fileFormat}}
+###
+
+POST {{queryURL}}
+Content-Type: application/json
+
+{
+  "from_lat": 20.96360,
+  "from_lng": 105.79889,
+  "to_lat": 21.03711,
+  "to_lng": 105.83747
+}
+
+>>! {{filePath}}_7.{{fileFormat}}
+###
+
+POST {{queryURL}}
+Content-Type: application/json
+
+{
+  "from_lat": 20.98741,
+  "from_lng": 105.85868,
+  "to_lat": 21.03546,
+  "to_lng": 105.84033
+}
+
+>>! {{filePath}}_8.{{fileFormat}}
+###
+
+POST {{queryURL}}
+Content-Type: application/json
+
+{
+  "from_lat": 20.91884,
+  "from_lng": 105.87362,
+  "to_lat": 21.04038,
+  "to_lng": 105.79873
+}
+
+>>! {{filePath}}_9.{{fileFormat}}
+###
+
+POST {{queryURL}}
+Content-Type: application/json
+
+{
+  "from_lat": 21.05348,
+  "from_lng": 105.78074,
+  "to_lat": 20.99071,
+  "to_lng": 105.85271
+}
+
+>>! {{filePath}}_10.{{fileFormat}}
+###        

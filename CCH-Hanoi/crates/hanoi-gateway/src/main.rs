@@ -131,8 +131,8 @@ async fn main() {
     // CLI --port overrides config file
     let port = args.port.unwrap_or(config.port);
 
-    let profile_names: Vec<&str> = {
-        let mut names: Vec<&str> = config.profiles.keys().map(|s| s.as_str()).collect();
+    let profile_names: Vec<String> = {
+        let mut names: Vec<String> = config.profiles.keys().cloned().collect();
         names.sort_unstable();
         names
     };

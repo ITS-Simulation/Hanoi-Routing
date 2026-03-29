@@ -12,9 +12,9 @@ use rust_road_router::io::Load;
 
 use crate::bounds::{BoundingBox, CoordRejection, ValidationConfig};
 use crate::cch::{QueryAnswer, route_distance_m};
-use crate::geometry::{compute_turns, refine_turns};
+use crate::geometry::compute_turns;
 use crate::graph::GraphData;
-use crate::spatial::SpatialIndex;
+use crate::spatial::{SNAP_MAX_CANDIDATES, SpatialIndex};
 
 /// CCH context for line graphs. Uses `DirectedCCH` (pruned — no always-INFINITY
 /// edges) for efficient turn-expanded graph routing.
@@ -261,13 +261,14 @@ impl<'a> LineGraphQueryEngine<'a> {
             };
 
             // Build turns from trimmed path
-            let turns = refine_turns(compute_turns(
+            let turns = compute_turns(
                 trimmed,
                 &self.context.original_tail,
                 &self.context.original_head,
+                &self.context.original_first_out,
                 &self.context.original_latitude,
                 &self.context.original_longitude,
-            ));
+            );
 
             // Map trimmed LG path to original intersection node IDs
             let mut path: Vec<NodeId> = trimmed
@@ -332,13 +333,14 @@ impl<'a> LineGraphQueryEngine<'a> {
             let distance_ms = cch_distance.saturating_add(source_edge_cost);
 
             let lg_path = connected.node_path();
-            let turns = refine_turns(compute_turns(
+            let turns = compute_turns(
                 &lg_path,
                 &self.context.original_tail,
                 &self.context.original_head,
+                &self.context.original_first_out,
                 &self.context.original_latitude,
                 &self.context.original_longitude,
-            ));
+            );
 
             // Map line-graph path to original intersection node IDs.
             // Each line-graph node is an original edge index; we map it to the
@@ -387,66 +389,51 @@ impl<'a> LineGraphQueryEngine<'a> {
     /// original edge ID directly as a line-graph node ID. This eliminates the
     /// coordinate-space divergence that previously caused different edge selection
     /// between normal and line-graph engines.
-    ///
-    /// Falls back to both endpoints of each snapped edge, then to outgoing
-    /// edges from each endpoint (expanded candidate set).
     pub fn query_coords(
         &mut self,
         from: (f32, f32),
         to: (f32, f32),
     ) -> Result<Option<QueryAnswer>, CoordRejection> {
-        // Snap in original-graph intersection-node space
-        let src_snap = self.original_spatial.validated_snap(
+        let src_snaps = self.original_spatial.validated_snap_candidates(
             "origin",
             from.0,
             from.1,
             &self.validation_config,
+            SNAP_MAX_CANDIDATES,
         )?;
-        let dst_snap = self.original_spatial.validated_snap(
+        let dst_snaps = self.original_spatial.validated_snap_candidates(
             "destination",
             to.0,
             to.1,
             &self.validation_config,
+            SNAP_MAX_CANDIDATES,
         )?;
-
-        // The snapped edge_id IS the line-graph node ID (line-graph node N = original edge N).
-        let src_edge = src_snap.edge_id;
-        let dst_edge = dst_snap.edge_id;
-
-        tracing::debug!(
-            src_edge,
-            dst_edge,
-            src_snap_dist_m = src_snap.snap_distance_m,
-            dst_snap_dist_m = dst_snap.snap_distance_m,
-            "unified snap: original edge IDs → line-graph node IDs"
-        );
-
-        // Primary: route directly between snapped original edges (trimmed)
-        if let Some(answer) = self.query_trimmed(src_edge, dst_edge) {
-            return Ok(Some(Self::patch_coordinates(answer, from, to)));
-        }
-
-        // Fallback: try all candidate original edges from both snap results.
-        // Candidates include both endpoints of the snapped edge plus outgoing
-        // edges from both endpoints (to handle one-way streets, etc.).
-        let src_candidates = self.collect_original_edge_candidates(&src_snap);
-        let dst_candidates = self.collect_original_edge_candidates(&dst_snap);
 
         let mut best: Option<QueryAnswer> = None;
 
-        for &s in &src_candidates {
-            for &d in &dst_candidates {
-                if s == src_edge && d == dst_edge {
-                    continue; // Already tried
-                }
-                if let Some(answer) = self.query_trimmed(s, d) {
+        for src in &src_snaps {
+            for dst in &dst_snaps {
+                tracing::debug!(
+                    src_edge = src.edge_id,
+                    dst_edge = dst.edge_id,
+                    src_snap_dist_m = src.snap_distance_m,
+                    dst_snap_dist_m = dst.snap_distance_m,
+                    "unified snap candidate pair: original edge IDs → line-graph node IDs"
+                );
+
+                if let Some(answer) = self.query_trimmed(src.edge_id, dst.edge_id) {
                     let is_better = best
                         .as_ref()
                         .map_or(true, |b| answer.distance_ms < b.distance_ms);
                     if is_better {
                         best = Some(answer);
                     }
+                    break;
                 }
+            }
+
+            if best.is_some() {
+                break;
             }
         }
 
@@ -473,33 +460,6 @@ impl<'a> LineGraphQueryEngine<'a> {
 
     pub fn validation_config(&self) -> &ValidationConfig {
         &self.validation_config
-    }
-
-    /// Collect candidate original **edge IDs** (= line-graph node IDs) from a
-    /// snap result in original-graph space.
-    ///
-    /// The snap gives us one original edge directly (`edge_id`). We also include
-    /// all other outgoing edges from both the tail and head intersection nodes
-    /// of the snapped edge, which covers bidirectional roads and nearby turns.
-    fn collect_original_edge_candidates(&self, snap: &crate::spatial::SnapResult) -> Vec<EdgeId> {
-        let primary = snap.edge_id;
-        let mut edges = vec![primary];
-
-        // Add all outgoing original edges from the tail node
-        for (edge, _, _) in self.original_spatial.edges_incident_to(snap.tail) {
-            if edge != primary && !edges.contains(&edge) {
-                edges.push(edge);
-            }
-        }
-
-        // Add all outgoing original edges from the head node
-        for (edge, _, _) in self.original_spatial.edges_incident_to(snap.head) {
-            if !edges.contains(&edge) {
-                edges.push(edge);
-            }
-        }
-
-        edges
     }
 
     /// Access the original-graph spatial index (used for unified snapping).

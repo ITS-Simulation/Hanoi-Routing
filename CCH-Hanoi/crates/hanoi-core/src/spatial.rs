@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::num::NonZero;
 
 use kiddo::ImmutableKdTree;
@@ -43,6 +44,8 @@ pub struct SpatialIndex {
 }
 
 const K_NEAREST_NODES: usize = 10;
+const SNAP_CANDIDATE_FILTER_BUFFER: usize = 2;
+pub(crate) const SNAP_MAX_CANDIDATES: usize = 5;
 
 impl SpatialIndex {
     /// Build a spatial index from graph node coordinates and CSR adjacency.
@@ -74,35 +77,28 @@ impl SpatialIndex {
         }
     }
 
-    /// Snap a coordinate to the nearest edge in the graph.
-    ///
-    /// Algorithm:
-    /// 1. KD-tree query → find k nearest nodes
-    /// 2. For each nearby node, collect all outgoing edges
-    /// 3. For each candidate edge (tail→head), compute Haversine perpendicular distance
-    /// 4. Return the edge with the smallest distance, including the projection parameter t
-    #[tracing::instrument(skip(self), fields(lat, lng))]
-    pub fn snap_to_edge(&self, lat: f32, lng: f32) -> SnapResult {
+    /// Return up to `max_results` snap candidates, sorted by ascending
+    /// Haversine distance. Deduplicates by edge_id.
+    #[tracing::instrument(skip(self), fields(lat, lng, max_results))]
+    pub fn snap_candidates(&self, lat: f32, lng: f32, max_results: usize) -> Vec<SnapResult> {
+        if max_results == 0 {
+            return Vec::new();
+        }
+
         let query_point = [lat, lng];
         let k = NonZero::new(K_NEAREST_NODES).unwrap();
         let nearest = self.tree.nearest_n::<SquaredEuclidean>(&query_point, k);
 
-        let mut best_edge: Option<EdgeId> = None;
-        let mut best_tail: NodeId = 0;
-        let mut best_head: NodeId = 0;
-        let mut best_dist = f64::MAX;
-        let mut best_t: f64 = 0.0;
+        let mut best_by_edge: HashMap<EdgeId, SnapResult> = HashMap::new();
 
         for nn in &nearest {
             let node = nn.item as NodeId;
             let start = self.first_out[node as usize] as usize;
             let end = self.first_out[node as usize + 1] as usize;
 
-            // Check all outgoing edges from this node
             for edge_idx in start..end {
                 let tail_node = node;
                 let head_node = self.head[edge_idx];
-
                 let (dist, t) = haversine_perpendicular_distance_with_t(
                     lat as f64,
                     lng as f64,
@@ -112,23 +108,44 @@ impl SpatialIndex {
                     self.lng[head_node as usize] as f64,
                 );
 
-                if dist < best_dist {
-                    best_dist = dist;
-                    best_edge = Some(edge_idx as EdgeId);
-                    best_tail = tail_node;
-                    best_head = head_node;
-                    best_t = t;
+                let edge_id = edge_idx as EdgeId;
+                let candidate = SnapResult {
+                    edge_id,
+                    tail: tail_node,
+                    head: head_node,
+                    t,
+                    snap_distance_m: dist,
+                };
+
+                match best_by_edge.get_mut(&edge_id) {
+                    Some(best) if candidate.snap_distance_m < best.snap_distance_m => {
+                        *best = candidate;
+                    }
+                    Some(_) => {}
+                    None => {
+                        best_by_edge.insert(edge_id, candidate);
+                    }
                 }
             }
         }
 
-        SnapResult {
-            edge_id: best_edge.expect("graph must have at least one edge near the query point"),
-            tail: best_tail,
-            head: best_head,
-            t: best_t,
-            snap_distance_m: best_dist,
-        }
+        let mut candidates: Vec<SnapResult> = best_by_edge.into_values().collect();
+        candidates.sort_by(|a, b| {
+            a.snap_distance_m
+                .total_cmp(&b.snap_distance_m)
+                .then_with(|| a.edge_id.cmp(&b.edge_id))
+        });
+        candidates.truncate(max_results);
+        candidates
+    }
+
+    /// Snap a coordinate to the nearest edge in the graph.
+    #[tracing::instrument(skip(self), fields(lat, lng))]
+    pub fn snap_to_edge(&self, lat: f32, lng: f32) -> SnapResult {
+        self.snap_candidates(lat, lng, 1)
+            .into_iter()
+            .next()
+            .expect("graph must have at least one edge near the query point")
     }
 
     /// Find all edges incident to a given node (outgoing edges).
@@ -159,21 +176,49 @@ impl SpatialIndex {
         lng: f32,
         config: &ValidationConfig,
     ) -> Result<SnapResult, CoordRejection> {
+        self.validated_snap_candidates(label, lat, lng, config, 1)
+            .map(|mut candidates| candidates.remove(0))
+    }
+
+    /// Validate coordinates, then return up to `max_results` snap candidates
+    /// within `max_snap_distance_m`.
+    #[tracing::instrument(skip(self, config), fields(label, lat, lng, max_results))]
+    pub fn validated_snap_candidates(
+        &self,
+        label: &'static str,
+        lat: f32,
+        lng: f32,
+        config: &ValidationConfig,
+        max_results: usize,
+    ) -> Result<Vec<SnapResult>, CoordRejection> {
         crate::bounds::validate_coordinate(label, lat, lng, &self.bbox, config)?;
 
-        let result = self.snap_to_edge(lat, lng);
+        let all = self.snap_candidates(
+            lat,
+            lng,
+            max_results.saturating_add(SNAP_CANDIDATE_FILTER_BUFFER),
+        );
+        let best_distance = all
+            .first()
+            .map_or(f64::MAX, |candidate| candidate.snap_distance_m);
 
-        if result.snap_distance_m > config.max_snap_distance_m {
+        let mut filtered: Vec<SnapResult> = all
+            .into_iter()
+            .filter(|candidate| candidate.snap_distance_m <= config.max_snap_distance_m)
+            .collect();
+
+        if filtered.is_empty() {
             return Err(CoordRejection::SnapTooFar {
                 label,
                 lat,
                 lng,
-                snap_distance_m: result.snap_distance_m,
+                snap_distance_m: best_distance,
                 max_distance_m: config.max_snap_distance_m,
             });
         }
 
-        Ok(result)
+        filtered.truncate(max_results);
+        Ok(filtered)
     }
 }
 

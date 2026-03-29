@@ -1,5 +1,277 @@
 # CHANGELOGS.md
 
+## 2026-03-29 — CCH-Hanoi: Reset turn-generation pipeline to raw output
+
+- **`CCH-Hanoi/crates/hanoi-core/src/geometry.rs`**: Wiped all turn
+  post-processing passes (`suppress_low_degree_turns`, `detect_roundabouts`,
+  `merge_straights`, `refine_turns`, `suppress_close_turns`,
+  `annotate_distances`, `path_distance`). Removed `RoundaboutStraight` and
+  `RoundaboutLeft` variants from `TurnDirection`. Removed `edge_count` field
+  from `TurnAnnotation`. Kept core: `compute_turn_angle`, `classify_turn`,
+  `compute_turns`, `TurnDirection` (Straight/Left/Right/UTurn),
+  `TurnAnnotation` with `direction`, `angle_degrees`, `coordinate_index`,
+  `distance_to_next_m`, `intersection_degree`. `coordinate_index` is now
+  assigned directly in `compute_turns` as `i + 1`.
+- **`CCH-Hanoi/crates/hanoi-core/src/line_graph.rs`**: Removed all
+  post-processing calls from both `query()` and `query_trimmed()` (no more
+  `refine_turns`, `retain`, `suppress_close_turns`, `annotate_distances`).
+  Turns output is now raw `compute_turns` output. Fresh start for redesign.
+
+## 2026-03-29 — CCH-Hanoi: Suppress short-distance turn noise
+
+- **`CCH-Hanoi/crates/hanoi-core/src/geometry.rs`**: Added
+  `suppress_close_turns()` with `MIN_TURN_SPACING_M = 20.0`. Walks the turn
+  list front-to-back, dropping any turn whose path distance from the previous
+  surviving turn (or route start) is < 20m. Eliminates road-curvature
+  artifacts caused by OSM's dense node placement on curves — e.g., a
+  Right(-72°) then Left(+75°) at 0.21m apart on a smooth road bend.
+  Extracted `path_distance()` helper for haversine sum between coordinate
+  indices.  Also `#[serde(skip)]` on `edge_count` and `coordinate_index`
+  (internal pipeline fields, not meaningful to API consumers).
+- **`CCH-Hanoi/crates/hanoi-core/src/line_graph.rs`**: Updated both
+  `query()` and `query_trimmed()` post-processing pipeline to:
+  `retain(Straight)` → `suppress_close_turns()` → `annotate_distances()`.
+
+## 2026-03-29 — CCH-Hanoi: Degree-aware roundabout detection + strip straights
+
+- **`CCH-Hanoi/crates/hanoi-core/src/geometry.rs`**: Added
+  `RoundaboutStraight` and `RoundaboutLeft` variants to `TurnDirection`.
+  Added `intersection_degree: u32` field to `TurnAnnotation` (`#[serde(skip)]`
+  — internal only, not serialized). Replaced `cancel_s_curves()` with
+  `detect_roundabouts()`: adjacent opposite-sign turn pairs (both non-straight,
+  individual < 60°) are now checked against node degree — pairs where **both**
+  intersection nodes have outgoing degree ≥ 3 are classified as roundabouts by
+  net angle (`RoundaboutStraight` |net| < 25°, `RoundaboutLeft` net > 0°,
+  plain `Right` net < 0°); pairs at degree-2 nodes collapse to `Straight`
+  (road wiggle). `compute_turns()` now accepts `original_first_out` to compute
+  degree. Removed `S_CURVE_NET_THRESHOLD_DEG` constant, added
+  `ROUNDABOUT_MIN_DEGREE = 3`.
+- **`CCH-Hanoi/crates/hanoi-core/src/line_graph.rs`**: Updated both
+  `compute_turns()` callsites in `query()` and `query_trimmed()` to pass
+  `original_first_out`. Added `turns.retain(|t| t.direction !=
+  TurnDirection::Straight)` in both methods **before** `annotate_distances()`
+  so that `distance_to_next_m` measures the gap between consecutive actionable
+  maneuvers. Straights remain in the internal refinement pipeline but are no
+  longer emitted. Roundabout variants survive the filter.
+
+## 2026-03-29 — Audit fixes: gateway compile error + snap candidate sort determinism
+
+- **`CCH-Hanoi/crates/hanoi-gateway/src/main.rs`**: Fixed borrow-after-move
+  compile error: `profile_names` held `Vec<&str>` borrowing
+  `config.profiles`, which was then moved into `GatewayState::new()` but
+  still referenced by `tracing::info!`. Changed to `Vec<String>` with
+  `.cloned()`.
+- **`CCH-Hanoi/crates/hanoi-core/src/spatial.rs`**: Added `edge_id`
+  tiebreaker to `snap_candidates()` sort to ensure deterministic candidate
+  ordering when multiple edges have identical snap distances, conforming to
+  the Progressive Snapping plan's invariant (Section 7, point 5).
+
+## 2026-03-29 — CCH-Hanoi: Add distance-to-next on turn annotations
+
+- **`CCH-Hanoi/crates/hanoi-core/src/geometry.rs`**: Extended
+  `TurnAnnotation` with `distance_to_next_m: f64`. Added
+  `annotate_distances()` to assign per-maneuver distances from
+  `coordinate_index` to the next maneuver (or route end). Updated every
+  `TurnAnnotation { ... }` constructor in the turn-refinement pipeline to seed
+  the new field with `0.0` until post-processing runs.
+- **`CCH-Hanoi/crates/hanoi-core/src/line_graph.rs`**: Updated both `query()`
+  and `query_trimmed()` to call `annotate_distances(&mut turns, &coordinates)`
+  after coordinates are built, so line-graph turn output now includes the
+  distance until the next maneuver without changing route geometry assembly.
+
+## 2026-03-29 — CCH-Hanoi: Progressive multi-candidate snapping for coordinate queries
+
+- **`CCH-Hanoi/crates/hanoi-core/src/spatial.rs`**: Added
+  `SNAP_MAX_CANDIDATES`, `snap_candidates()`, and
+  `validated_snap_candidates()`. `snap_to_edge()` and `validated_snap()` now
+  delegate to the multi-candidate helpers. Candidate collection still uses the
+  10 nearest KD-tree nodes, now deduplicates by `edge_id`, sorts by
+  `snap_distance_m`, and preserves `SnapTooFar` rejection details using the
+  best available snap distance when no filtered candidate remains.
+- **`CCH-Hanoi/crates/hanoi-core/src/cch.rs`**: Rewrote
+  `QueryEngine::query_coords()` to request up to 5 ranked snap candidates for
+  origin and destination, then try ranked snap-pair routes via nearest
+  endpoints until the first routable pair succeeds. Removed the old single-snap
+  endpoint-combination fallback.
+- **`CCH-Hanoi/crates/hanoi-core/src/line_graph.rs`**: Rewrote
+  `LineGraphQueryEngine::query_coords()` to use ranked original-edge snap
+  candidates with `query_trimmed()`, preserving unified original-graph snap
+  space while removing the old `collect_original_edge_candidates()` expansion
+  path.
+
+## 2026-03-29 — CCH-Hanoi: Snap edge trimming for coordinate-based line-graph queries
+
+- **`CCH-Hanoi/crates/hanoi-core/src/line_graph.rs`**: Added private
+  `query_trimmed()` method to `LineGraphQueryEngine`. Runs the same CCH query as
+  `query()` but trims the first and last elements from the LG path (the snapped
+  source and destination edges) before building turns, coordinates, and distance.
+  This eliminates phantom first/last turns caused by coordinate snapping to full
+  edge extents. `query_coords()` now calls `query_trimmed()` instead of `query()`
+  for both the primary path and the fallback candidate loop. `query()` remains
+  unchanged for direct node-ID callers. Fallback route ranking still uses
+  `distance_ms` (full CCH travel time).
+
+## 2026-03-29 — CCH-Hanoi: Purge test code
+
+- **`CCH-Hanoi/crates/hanoi-core/src/geometry.rs`**: Removed `#[cfg(test)]`
+  module (9 unit tests for turn direction classification and refinement pipeline).
+- **`CCH-Hanoi/crates/hanoi-core/tests/turn_direction_integration.rs`**: Removed
+  entirely (integration test for line-graph turn annotations).
+
+## 2026-03-29 — CCH-Hanoi: Turn refinement pipeline (S-curve cancellation + straight merging)
+
+- **`CCH-Hanoi/crates/hanoi-core/src/geometry.rs`**: Extended `TurnAnnotation`
+  with `edge_count: u32` and `coordinate_index: u32` fields. Added two new
+  constants (`S_CURVE_NET_THRESHOLD_DEG = 15.0`, `S_CURVE_MAX_THRESHOLD_DEG =
+  60.0`). Implemented two-pass refinement pipeline: `cancel_s_curves()` replaces
+  adjacent opposite-sign turn pairs (< 60° individual, < 15° net residual) with
+  a single straight; `merge_straights()` collapses consecutive straight runs into
+  one entry with cumulative angle, edge count, and coordinate index.
+  `refine_turns()` convenience wrapper chains both passes. Updated
+  `compute_turns()` to initialize new fields.
+- **`CCH-Hanoi/crates/hanoi-core/src/line_graph.rs`**: Updated import and
+  replaced bare `compute_turns(...)` call with `refine_turns(compute_turns(...))`
+  so line-graph queries return refined turn annotations.
+
+## 2026-03-28 — Fix: Move query point coordinates from geometry to properties
+
+- **`CCH-Hanoi/crates/hanoi-core/src/cch.rs`**: Added `origin` and `destination`
+  fields (`Option<(f32, f32)>`) to `QueryAnswer`. Changed `patch_coordinates()`
+  to store user-supplied coordinates as metadata instead of inserting them into
+  the coordinate array. `distance_m` now reflects pure graph-node distance only.
+- **`CCH-Hanoi/crates/hanoi-core/src/line_graph.rs`**: Same `patch_coordinates()`
+  change — origin/destination stored as metadata, coordinate array stays pure.
+- **`CCH-Hanoi/crates/hanoi-server/src/engine.rs`**: Updated `answer_to_response`
+  and `answer_to_geojson` to propagate origin/destination into output properties.
+  GeoJSON embeds them as `[lat, lng]` in `properties.origin` / `properties.destination`.
+- **`CCH-Hanoi/crates/hanoi-server/src/types.rs`**: Added `origin` and
+  `destination` fields (`Option<[f32; 2]>`) to `QueryResponse`, both with
+  `skip_serializing_if = "Option::is_none"`.
+
+## 2026-03-28 — Audit: Turn direction post-implementation fixes
+
+- **`CCH-Hanoi/crates/hanoi-core/src/geometry.rs`**: Added `debug_assert_eq!` in
+  `compute_turns()` to verify the line-graph invariant `head_a == tail_b` (shared
+  intersection) at each consecutive edge pair. Catches data corruption in debug
+  builds. Promoted f32→f64 before subtraction in `compute_turn_angle()` to
+  preserve precision on short urban segments (f32 subtraction at lng ~105° has
+  ~12m rounding error per coordinate).
+- **`CCH-Hanoi/crates/hanoi-server/src/types.rs`**: Added
+  `#[serde(skip_serializing_if = "Vec::is_empty")]` to `QueryResponse::turns`.
+  Now `?format=json` omits the `turns` key for normal-graph queries (no turn
+  data), consistent with how GeoJSON conditionally includes it.
+
+## 2026-03-28 — CCH-Hanoi: Add line-graph turn direction annotations
+
+- **`CCH-Hanoi/crates/hanoi-core/src/geometry.rs`** (new) + **`CCH-Hanoi/crates/hanoi-core/Cargo.toml`**:
+  Added the dedicated geometry module from the implementation plan, including
+  `TurnDirection`, `TurnAnnotation`, threshold constants, signed-angle
+  computation via dot/cross products in a local equirectangular projection, and
+  unit tests covering straight/left/right/U-turn/degenerate cases. Added
+  `serde` derive support to serialize turn annotations.
+- **`CCH-Hanoi/crates/hanoi-core/src/lib.rs`**, **`CCH-Hanoi/crates/hanoi-core/src/cch.rs`**,
+  **`CCH-Hanoi/crates/hanoi-core/src/line_graph.rs`**,
+  **`CCH-Hanoi/crates/hanoi-core/tests/turn_direction_integration.rs`**:
+  Registered/re-exported the new geometry module, extended `QueryAnswer` with
+  `turns`, kept normal-graph queries empty by construction, computed line-graph
+  turn annotations before coordinate patching, and added a synthetic
+  line-graph integration test that verifies `Straight -> Left -> Straight`
+  annotations on an L-shaped route.
+- **`CCH-Hanoi/crates/hanoi-server/src/types.rs`** +
+  **`CCH-Hanoi/crates/hanoi-server/src/engine.rs`**: Extended JSON responses
+  with a `turns` field and now embed non-empty turn annotations in GeoJSON
+  feature `properties` while preserving existing response behavior for routes
+  without turn data.
+
+## 2026-03-28 — Gateway: Move profile selection from JSON body to query parameter
+
+- **`CCH-Hanoi/crates/hanoi-gateway/src/types.rs`**: Removed `GatewayQueryRequest`
+  and `BackendQueryRequest` structs. Replaced with `GatewayQueryParam` that
+  combines `profile`, `format`, and `colors` into a single query-string extractor.
+  Body is now forwarded as raw bytes — no deserialization or stripping needed.
+- **`CCH-Hanoi/crates/hanoi-gateway/src/proxy.rs`**: `handle_query` now extracts
+  `profile` from `?profile=<name>` query parameter instead of JSON body. Body is
+  accepted as raw `Bytes` and forwarded unchanged to the backend. Removed
+  `serde::Serialize` dependency (no longer building `BackendQueryRequest`).
+- **`CCH-Hanoi/README.md`** + **`docs/walkthrough/CCH-Hanoi Usage Guide.md`**:
+  Updated §7.4 endpoint table, §7.5 architecture flowchart, §11.1 gateway request
+  example, §13.5 curl examples, §13.7 error case, §13.9 validation checklist —
+  all `POST /query` examples now use `?profile=car` query parameter with
+  profile-free JSON body.
+
+## 2026-03-28 — Gateway: Migrate from graph-type to profile-based routing with YAML config
+
+- **`CCH-Hanoi/crates/hanoi-gateway/Cargo.toml`**: Added `serde_yaml` dependency.
+- **`CCH-Hanoi/crates/hanoi-gateway/src/config.rs`** (new): YAML config schema
+  (`GatewayConfig`, `ProfileConfig`, `LogFormat`), loader with validation
+  (non-empty profiles, trailing-slash normalization).
+- **`CCH-Hanoi/crates/hanoi-gateway/src/types.rs`**: Replaced `graph_type`
+  field with `profile` in `GatewayQueryRequest` and `InfoQuery`.
+- **`CCH-Hanoi/crates/hanoi-gateway/src/proxy.rs`**: `GatewayState` now holds
+  `HashMap<String, ProfileConfig>` instead of two hardcoded URLs. Backend
+  selection uses profile name lookup. Added `GET /profiles` endpoint for client
+  discovery. Error responses include `available_profiles` list.
+- **`CCH-Hanoi/crates/hanoi-gateway/src/main.rs`**: Replaced CLI backend args
+  (`--normal_backend`, `--line_graph_backend`) with `--config <path>` pointing
+  to a YAML file. `--port` retained as optional override. `LogFormat` moved to
+  `config.rs`. Registered `/profiles` route.
+- **`CCH-Hanoi/crates/hanoi-gateway/gateway.yaml`** (new): Example config file.
+- **`CCH-Hanoi/README.md`** + **`docs/walkthrough/CCH-Hanoi Usage Guide.md`**:
+  Updated gateway sections (§7, §11, §13.5, §13.7, §14.4, §14.5) — all
+  `graph_type` references replaced with `profile`, CLI examples updated to use
+  `--config gateway.yaml`, added `/profiles` endpoint docs, flowcharts relabeled
+  from normal/line_graph to car/motorcycle.
+
+## 2026-03-27 — Server: Sync GeoJSON output format with CLI (FeatureCollection)
+
+- **`CCH-Hanoi/crates/hanoi-server/src/engine.rs`**: Changed `answer_to_geojson`
+  to wrap results in a `FeatureCollection` (with a single `Feature`) instead of
+  a bare `Feature`. This matches the `hanoi-cli` output format and improves
+  compatibility with GeoJSON consumers (geojson.io, Leaflet, QGIS). Also
+  switched coordinate serialization from `serde_json::json!([lng, lat])` (Value)
+  to `[f32; 2]` arrays for consistency with the CLI.
+- **`CCH-Hanoi/README.md`** + **`docs/walkthrough/CCH-Hanoi Usage Guide.md`**:
+  Updated GeoJSON response examples and verification checklists to reflect
+  FeatureCollection wrapper.
+
+## 2026-03-27 — Server: Add `?colors` query param for simplestyle-spec GeoJSON
+
+- **`CCH-Hanoi/crates/hanoi-server/src/`**: Added `colors` query parameter.
+  When present (`?colors`), GeoJSON responses include simplestyle-spec
+  visualization properties (`stroke`, `stroke-width`, `fill`, `fill-opacity`).
+  Ignored when `?format=json`.
+  - `types.rs`: Added `colors: Option<String>` to `FormatParam`
+  - `state.rs`: Added `colors: bool` to `QueryMsg`
+  - `handlers.rs`: Passes `colors` presence from query params
+  - `engine.rs`: `answer_to_geojson` injects simplestyle properties when
+    `colors` is true
+- **`CCH-Hanoi/crates/hanoi-gateway/src/`**: Gateway forwards `?colors` param
+  to backend URLs alongside `?format`.
+  - `types.rs`: Added `colors` to `GatewayFormatParam`
+  - `proxy.rs`: Builds query string with both `format` and `colors` params
+- **`CCH-Hanoi/README.md`** + **`docs/walkthrough/CCH-Hanoi Usage Guide.md`**:
+  Updated API docs and test examples with `?colors` usage.
+
+## 2026-03-26 — Docs: Clarify query walk termination in Stage 5
+
+- **`docs/walkthrough/CCH Deep Dive.md`**: Rewrote Stage 5 "The idea" and
+  "How the walk works" sections to make clear that both walks go **all the way
+  to the root** — they do not stop at the first intersection. Added explanation
+  of why early termination is incorrect (rank order ≠ distance order, unlike
+  Dijkstra), a scenario diagram showing how the first intersection can be
+  suboptimal, and expanded the concrete query meeting-point table with a
+  "why not optimal?" column demonstrating the cost of early stopping.
+
+## 2026-03-26 — Docs: Clarify triangle relaxation directional cross-pattern
+
+- **`docs/walkthrough/CCH Deep Dive.md`**: Expanded the "Sub-phase B: Lower
+  triangle relaxation" section with a detailed explanation of why the formulas
+  use a cross-pattern (downward + upward, upward + downward). Added step-by-step
+  directional traces showing how the two-hop detour through the lowest-ranked
+  node always goes "down then up" in the elimination ordering, a summary table,
+  and expanded the "Why it works" subsection with three numbered guarantees
+  (triangle sufficiency, bottom-up correctness, single-pass property).
+
 ## 2026-03-26 — CCH-Generator: Downgrade travel-time >24h check to warning
 
 - **`CCH-Generator/src/validate_graph.cpp`**: Changed the "Travel time sanity"
