@@ -90,7 +90,11 @@ fn main() {
         tracing::info!(path = %path.display(), "loading queries");
         load_queries(path)
     } else {
-        tracing::info!(count = query_count, seed = args.seed, "generating random queries");
+        tracing::info!(
+            count = query_count,
+            seed = args.seed,
+            "generating random queries"
+        );
         generate_random_queries(
             context.graph.num_nodes() as u32,
             &context.graph.latitude,

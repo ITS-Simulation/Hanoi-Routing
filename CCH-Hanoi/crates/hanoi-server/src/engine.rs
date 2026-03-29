@@ -47,7 +47,8 @@ pub fn run_normal(
 
         match msg {
             Ok(Some(qm)) => {
-                let resp = dispatch_normal(&mut engine, qm.request, qm.format.as_deref(), qm.colors);
+                let resp =
+                    dispatch_normal(&mut engine, qm.request, qm.format.as_deref(), qm.colors);
                 let _ = qm.reply.send(resp);
             }
             Ok(None) => break, // Channel closed — shutdown
@@ -88,7 +89,8 @@ pub fn run_line_graph(
 
         match msg {
             Ok(Some(qm)) => {
-                let resp = dispatch_line_graph(&mut engine, qm.request, qm.format.as_deref(), qm.colors);
+                let resp =
+                    dispatch_line_graph(&mut engine, qm.request, qm.format.as_deref(), qm.colors);
                 let _ = qm.reply.send(resp);
             }
             Ok(None) => break,
@@ -175,16 +177,30 @@ fn format_response(answer: Option<QueryAnswer>, format: Option<&str>, colors: bo
 
 fn answer_to_response(answer: Option<QueryAnswer>) -> QueryResponse {
     match answer {
-        Some(a) => QueryResponse {
-            distance_ms: Some(a.distance_ms),
-            distance_m: Some(a.distance_m),
-            path_nodes: a.path,
-            coordinates: a
-                .coordinates
-                .into_iter()
-                .map(|(lat, lng)| [lat, lng])
-                .collect(),
-        },
+        Some(a) => {
+            let QueryAnswer {
+                distance_ms,
+                distance_m,
+                path,
+                coordinates,
+                turns,
+                origin,
+                destination,
+            } = a;
+
+            QueryResponse {
+                distance_ms: Some(distance_ms),
+                distance_m: Some(distance_m),
+                path_nodes: path,
+                coordinates: coordinates
+                    .into_iter()
+                    .map(|(lat, lng)| [lat, lng])
+                    .collect(),
+                turns,
+                origin: origin.map(|(lat, lng)| [lat, lng]),
+                destination: destination.map(|(lat, lng)| [lat, lng]),
+            }
+        }
         None => QueryResponse::empty(),
     }
 }
@@ -200,19 +216,34 @@ fn answer_to_response(answer: Option<QueryAnswer>) -> QueryResponse {
 fn answer_to_geojson(answer: Option<QueryAnswer>, colors: bool) -> Value {
     match answer {
         Some(a) => {
+            let QueryAnswer {
+                distance_ms,
+                distance_m,
+                path: _,
+                coordinates,
+                turns,
+                origin,
+                destination,
+            } = a;
+
             // Convert (lat, lng) → [lng, lat] per GeoJSON spec
-            let coords: Vec<[f32; 2]> = a
-                .coordinates
-                .iter()
-                .map(|&(lat, lng)| [lng, lat])
-                .collect();
+            let coords: Vec<[f32; 2]> = coordinates.iter().map(|&(lat, lng)| [lng, lat]).collect();
 
             let mut props = serde_json::json!({
-                "distance_ms": a.distance_ms,
-                "distance_m": a.distance_m
+                "distance_ms": distance_ms,
+                "distance_m": distance_m
             });
+            let obj = props.as_object_mut().unwrap();
+            if let Some((lat, lng)) = origin {
+                obj.insert("origin".into(), serde_json::json!([lat, lng]));
+            }
+            if let Some((lat, lng)) = destination {
+                obj.insert("destination".into(), serde_json::json!([lat, lng]));
+            }
+            if !turns.is_empty() {
+                obj.insert("turns".into(), serde_json::to_value(turns).unwrap());
+            }
             if colors {
-                let obj = props.as_object_mut().unwrap();
                 obj.insert("stroke".into(), serde_json::json!("#ff5500"));
                 obj.insert("stroke-width".into(), serde_json::json!(10));
                 obj.insert("fill".into(), serde_json::json!("#ffaa00"));

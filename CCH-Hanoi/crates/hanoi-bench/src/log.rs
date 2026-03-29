@@ -39,8 +39,7 @@ pub fn init_bench_tracing(name: Option<&str>) -> (PathBuf, WorkerGuard) {
 
     let (non_blocking, guard) = tracing_appender::non_blocking(file);
 
-    let filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     /// JSON file layer — machine-readable, no ANSI codes.
     fn file_layer<S>(

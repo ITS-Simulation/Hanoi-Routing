@@ -9,6 +9,7 @@ use rust_road_router::datastr::node_order::NodeOrder;
 use rust_road_router::io::Load;
 
 use crate::bounds::{BoundingBox, CoordRejection, ValidationConfig};
+use crate::geometry::TurnAnnotation;
 use crate::graph::GraphData;
 use crate::spatial::SpatialIndex;
 
@@ -20,8 +21,15 @@ pub struct QueryAnswer {
     pub distance_m: f64,
     /// Ordered sequence of node IDs along the shortest path.
     pub path: Vec<NodeId>,
-    /// Ordered (lat, lng) pairs for each path node.
+    /// Ordered (lat, lng) pairs for each path node (pure graph coordinates).
     pub coordinates: Vec<(f32, f32)>,
+    /// Turn annotations along the path.
+    /// Empty for normal-graph queries (no turn info available).
+    pub turns: Vec<TurnAnnotation>,
+    /// User-supplied origin coordinate (set by coordinate queries).
+    pub origin: Option<(f32, f32)>,
+    /// User-supplied destination coordinate (set by coordinate queries).
+    pub destination: Option<(f32, f32)>,
 }
 
 /// Sum Haversine distances between consecutive coordinates to get total route
@@ -155,6 +163,9 @@ impl<'a> QueryEngine<'a> {
                 distance_m,
                 path,
                 coordinates,
+                turns: vec![],
+                origin: None,
+                destination: None,
             })
         } else {
             None
@@ -212,13 +223,11 @@ impl<'a> QueryEngine<'a> {
         Ok(best.map(|answer| Self::patch_coordinates(answer, from, to)))
     }
 
-    /// Prepend the user's origin coordinate and append the destination coordinate
-    /// to the query result's coordinate path, so map visualizations show the full
-    /// journey from the user's actual position.
+    /// Attach the user's origin and destination coordinates to the query answer
+    /// as metadata — the coordinate path itself stays pure (graph nodes only).
     fn patch_coordinates(mut answer: QueryAnswer, from: (f32, f32), to: (f32, f32)) -> QueryAnswer {
-        answer.coordinates.insert(0, from);
-        answer.coordinates.push(to);
-        answer.distance_m = route_distance_m(&answer.coordinates);
+        answer.origin = Some(from);
+        answer.destination = Some(to);
         answer
     }
 

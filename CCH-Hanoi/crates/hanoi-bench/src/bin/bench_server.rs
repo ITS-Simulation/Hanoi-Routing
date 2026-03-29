@@ -113,7 +113,11 @@ async fn main() {
             args.seed,
         )
     } else {
-        tracing::info!(count = args.queries, seed = args.seed, "generating random coordinate queries within Hanoi bounding box");
+        tracing::info!(
+            count = args.queries,
+            seed = args.seed,
+            "generating random coordinate queries within Hanoi bounding box"
+        );
         generate_coord_queries(args.queries, args.seed)
     };
 
@@ -135,7 +139,10 @@ async fn main() {
     });
 
     // 2) HTTP query (sequential)
-    tracing::info!(query_count = args.queries, "benchmarking POST /query (sequential)");
+    tracing::info!(
+        query_count = args.queries,
+        "benchmarking POST /query (sequential)"
+    );
     let query_measurements = bench_http_query(&args.url, &queries, &config).await;
     runs.push(BenchmarkRun {
         name: "http_query".to_string(),
@@ -151,7 +158,11 @@ async fn main() {
 
     // 3) HTTP concurrent load test
     if args.concurrency > 1 {
-        tracing::info!(concurrency = args.concurrency, query_count = args.queries, "benchmarking POST /query (concurrent)");
+        tracing::info!(
+            concurrency = args.concurrency,
+            query_count = args.queries,
+            "benchmarking POST /query (concurrent)"
+        );
         let concurrent_measurements =
             bench_http_concurrent(&args.url, &queries, args.concurrency, &config).await;
         runs.push(BenchmarkRun {

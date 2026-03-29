@@ -106,10 +106,7 @@ impl GatewayConfig {
 
         // Normalize: strip trailing slashes from all backend URLs
         for profile in config.profiles.values_mut() {
-            profile.backend_url = profile
-                .backend_url
-                .trim_end_matches('/')
-                .to_string();
+            profile.backend_url = profile.backend_url.trim_end_matches('/').to_string();
         }
 
         Ok(config)

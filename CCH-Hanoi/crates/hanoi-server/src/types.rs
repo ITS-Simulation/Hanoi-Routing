@@ -1,3 +1,4 @@
+use hanoi_core::TurnAnnotation;
 use serde::{Deserialize, Serialize};
 
 use rust_road_router::datastr::graph::Weight;
@@ -38,6 +39,12 @@ pub struct QueryResponse {
     pub distance_m: Option<f64>,
     pub path_nodes: Vec<u32>,
     pub coordinates: Vec<[f32; 2]>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub turns: Vec<TurnAnnotation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<[f32; 2]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination: Option<[f32; 2]>,
 }
 
 impl QueryResponse {
@@ -47,6 +54,9 @@ impl QueryResponse {
             distance_m: None,
             path_nodes: vec![],
             coordinates: vec![],
+            turns: vec![],
+            origin: None,
+            destination: None,
         }
     }
 }

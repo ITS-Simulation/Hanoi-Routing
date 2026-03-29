@@ -55,8 +55,7 @@ fn parse_format(s: &str) -> ReportFormat {
 fn load_runs(path: &PathBuf) -> Result<Vec<BenchmarkRun>, String> {
     let data = std::fs::read_to_string(path)
         .map_err(|e| format!("failed to read {}: {}", path.display(), e))?;
-    serde_json::from_str(&data)
-        .map_err(|e| format!("failed to parse {}: {}", path.display(), e))
+    serde_json::from_str(&data).map_err(|e| format!("failed to parse {}: {}", path.display(), e))
 }
 
 fn main() {
@@ -88,7 +87,10 @@ fn main() {
         write_comparison_table(&results, &mut stdout);
 
         if any_regressed {
-            tracing::warn!(threshold = args.threshold, "REGRESSION DETECTED: one or more benchmarks regressed by more than threshold");
+            tracing::warn!(
+                threshold = args.threshold,
+                "REGRESSION DETECTED: one or more benchmarks regressed by more than threshold"
+            );
             // Explicitly drop guard to flush logs before exit
             drop(_guard);
             std::process::exit(1);
@@ -112,7 +114,9 @@ fn main() {
         return;
     }
 
-    tracing::error!("provide either --input for single report, or --baseline + --current for comparison");
+    tracing::error!(
+        "provide either --input for single report, or --baseline + --current for comparison"
+    );
     drop(_guard);
     std::process::exit(1);
 }

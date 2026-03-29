@@ -12,6 +12,7 @@ use rust_road_router::io::Load;
 
 use crate::bounds::{BoundingBox, CoordRejection, ValidationConfig};
 use crate::cch::{QueryAnswer, route_distance_m};
+use crate::geometry::{compute_turns, refine_turns};
 use crate::graph::GraphData;
 use crate::spatial::SpatialIndex;
 
@@ -227,6 +228,88 @@ impl<'a> LineGraphQueryEngine<'a> {
         }
     }
 
+    /// Query by line-graph node IDs (= original edge indices), with snap-edge
+    /// trimming. Runs the same CCH query as `query()` but removes the first
+    /// and last elements from the LG path before building turns, coordinates,
+    /// and distance. This eliminates phantom first/last turns caused by the
+    /// full extent of snapped source and destination edges.
+    ///
+    /// Used exclusively by `query_coords()` for coordinate-based queries.
+    fn query_trimmed(&mut self, source_edge: EdgeId, target_edge: EdgeId) -> Option<QueryAnswer> {
+        let result = self.server.query(Query {
+            from: source_edge as NodeId,
+            to: target_edge as NodeId,
+        });
+
+        if let Some(mut connected) = result.found() {
+            let cch_distance = connected.distance();
+            if cch_distance >= INFINITY {
+                return None;
+            }
+
+            // Source-edge correction (identical to query())
+            let source_edge_cost = self.context.original_travel_time[source_edge as usize];
+            let distance_ms = cch_distance.saturating_add(source_edge_cost);
+
+            let lg_path = connected.node_path();
+
+            // Trim: drop source and destination edges from the LG path
+            let trimmed: &[NodeId] = if lg_path.len() > 2 {
+                &lg_path[1..lg_path.len() - 1]
+            } else {
+                &[]
+            };
+
+            // Build turns from trimmed path
+            let turns = refine_turns(compute_turns(
+                trimmed,
+                &self.context.original_tail,
+                &self.context.original_head,
+                &self.context.original_latitude,
+                &self.context.original_longitude,
+            ));
+
+            // Map trimmed LG path to original intersection node IDs
+            let mut path: Vec<NodeId> = trimmed
+                .iter()
+                .map(|&lg_node| self.context.original_tail[lg_node as usize])
+                .collect();
+
+            if let Some(&last_edge) = trimmed.last() {
+                // Normal case: append head of the last trimmed edge
+                path.push(self.context.original_head[last_edge as usize]);
+            } else if lg_path.len() >= 2 {
+                // Trimmed to empty (adjacent edges or same-edge): use the shared
+                // intersection. By the LG invariant: head(src) == tail(dst).
+                path.push(self.context.original_head[lg_path[0] as usize]);
+            }
+
+            let coordinates: Vec<(f32, f32)> = path
+                .iter()
+                .map(|&node| {
+                    (
+                        self.context.original_latitude[node as usize],
+                        self.context.original_longitude[node as usize],
+                    )
+                })
+                .collect();
+
+            let distance_m = route_distance_m(&coordinates);
+
+            Some(QueryAnswer {
+                distance_ms,
+                distance_m,
+                path,
+                coordinates,
+                turns,
+                origin: None,
+                destination: None,
+            })
+        } else {
+            None
+        }
+    }
+
     /// Query by line-graph node IDs (= original edge indices).
     /// Adds the source edge's travel_time (excluded from the shifted
     /// line-graph encoding where each LG edge carries `tt(next_edge)`).
@@ -249,6 +332,13 @@ impl<'a> LineGraphQueryEngine<'a> {
             let distance_ms = cch_distance.saturating_add(source_edge_cost);
 
             let lg_path = connected.node_path();
+            let turns = refine_turns(compute_turns(
+                &lg_path,
+                &self.context.original_tail,
+                &self.context.original_head,
+                &self.context.original_latitude,
+                &self.context.original_longitude,
+            ));
 
             // Map line-graph path to original intersection node IDs.
             // Each line-graph node is an original edge index; we map it to the
@@ -281,6 +371,9 @@ impl<'a> LineGraphQueryEngine<'a> {
                 distance_m,
                 path,
                 coordinates,
+                turns,
+                origin: None,
+                destination: None,
             })
         } else {
             None
@@ -303,12 +396,18 @@ impl<'a> LineGraphQueryEngine<'a> {
         to: (f32, f32),
     ) -> Result<Option<QueryAnswer>, CoordRejection> {
         // Snap in original-graph intersection-node space
-        let src_snap =
-            self.original_spatial
-                .validated_snap("origin", from.0, from.1, &self.validation_config)?;
-        let dst_snap =
-            self.original_spatial
-                .validated_snap("destination", to.0, to.1, &self.validation_config)?;
+        let src_snap = self.original_spatial.validated_snap(
+            "origin",
+            from.0,
+            from.1,
+            &self.validation_config,
+        )?;
+        let dst_snap = self.original_spatial.validated_snap(
+            "destination",
+            to.0,
+            to.1,
+            &self.validation_config,
+        )?;
 
         // The snapped edge_id IS the line-graph node ID (line-graph node N = original edge N).
         let src_edge = src_snap.edge_id;
@@ -322,8 +421,8 @@ impl<'a> LineGraphQueryEngine<'a> {
             "unified snap: original edge IDs → line-graph node IDs"
         );
 
-        // Primary: route directly between snapped original edges
-        if let Some(answer) = self.query(src_edge, dst_edge) {
+        // Primary: route directly between snapped original edges (trimmed)
+        if let Some(answer) = self.query_trimmed(src_edge, dst_edge) {
             return Ok(Some(Self::patch_coordinates(answer, from, to)));
         }
 
@@ -340,7 +439,7 @@ impl<'a> LineGraphQueryEngine<'a> {
                 if s == src_edge && d == dst_edge {
                     continue; // Already tried
                 }
-                if let Some(answer) = self.query(s, d) {
+                if let Some(answer) = self.query_trimmed(s, d) {
                     let is_better = best
                         .as_ref()
                         .map_or(true, |b| answer.distance_ms < b.distance_ms);
@@ -354,13 +453,11 @@ impl<'a> LineGraphQueryEngine<'a> {
         Ok(best.map(|answer| Self::patch_coordinates(answer, from, to)))
     }
 
-    /// Prepend the user's origin coordinate and append the destination coordinate
-    /// to the query result's coordinate path, so map visualizations show the full
-    /// journey from the user's actual position.
+    /// Attach the user's origin and destination coordinates to the query answer
+    /// as metadata — the coordinate path itself stays pure (graph nodes only).
     fn patch_coordinates(mut answer: QueryAnswer, from: (f32, f32), to: (f32, f32)) -> QueryAnswer {
-        answer.coordinates.insert(0, from);
-        answer.coordinates.push(to);
-        answer.distance_m = route_distance_m(&answer.coordinates);
+        answer.origin = Some(from);
+        answer.destination = Some(to);
         answer
     }
 
@@ -384,10 +481,7 @@ impl<'a> LineGraphQueryEngine<'a> {
     /// The snap gives us one original edge directly (`edge_id`). We also include
     /// all other outgoing edges from both the tail and head intersection nodes
     /// of the snapped edge, which covers bidirectional roads and nearby turns.
-    fn collect_original_edge_candidates(
-        &self,
-        snap: &crate::spatial::SnapResult,
-    ) -> Vec<EdgeId> {
+    fn collect_original_edge_candidates(&self, snap: &crate::spatial::SnapResult) -> Vec<EdgeId> {
         let primary = snap.edge_id;
         let mut edges = vec![primary];
 

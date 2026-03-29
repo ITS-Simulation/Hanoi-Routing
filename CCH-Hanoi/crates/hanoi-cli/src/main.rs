@@ -318,7 +318,14 @@ fn main() {
 
             match answer {
                 Some(a) => {
-                    let output = format_result(a.distance_ms, a.distance_m, &a.path, &a.coordinates, &output_format, demo);
+                    let output = format_result(
+                        a.distance_ms,
+                        a.distance_m,
+                        &a.path,
+                        &a.coordinates,
+                        &output_format,
+                        demo,
+                    );
                     let output_str = serde_json::to_string_pretty(&output).unwrap();
 
                     let path = output_file.unwrap_or_else(|| {

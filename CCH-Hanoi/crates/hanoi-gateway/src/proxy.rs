@@ -219,9 +219,7 @@ pub async fn handle_info(
 /// ```json
 /// { "profiles": ["car", "motorcycle"] }
 /// ```
-pub async fn handle_profiles(
-    State(state): State<GatewayState>,
-) -> Json<Value> {
+pub async fn handle_profiles(State(state): State<GatewayState>) -> Json<Value> {
     Json(serde_json::json!({
         "profiles": state.available_profiles(),
     }))

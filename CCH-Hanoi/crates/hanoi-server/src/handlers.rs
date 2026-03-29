@@ -9,7 +9,8 @@ use rust_road_router::datastr::graph::INFINITY;
 
 use crate::state::{AppState, QueryMsg};
 use crate::types::{
-    CustomizeResponse, FormatParam, HealthResponse, InfoResponse, QueryRequest, QueryResponse, ReadyResponse,
+    CustomizeResponse, FormatParam, HealthResponse, InfoResponse, QueryRequest, QueryResponse,
+    ReadyResponse,
 };
 
 /// POST /query — route query (coordinate-based or node-ID-based).
@@ -93,7 +94,9 @@ pub async fn handle_customize(
                 accepted: false,
                 message: format!(
                     "weight[{}] = {} exceeds maximum allowed value ({})",
-                    pos, weights[pos], INFINITY - 1
+                    pos,
+                    weights[pos],
+                    INFINITY - 1
                 ),
             }),
         ));
