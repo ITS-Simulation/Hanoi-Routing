@@ -93,6 +93,14 @@ enum Command {
         /// (stroke, stroke-width, fill, fill-opacity)
         #[arg(long, default_value_t = false)]
         demo: bool,
+
+        /// Number of alternative routes to find (0 = single shortest path)
+        #[arg(long, default_value_t = 0)]
+        alternatives: u32,
+
+        /// Stretch factor for alternative routes (candidates up to this factor × optimal distance)
+        #[arg(long, default_value_t = hanoi_core::multi_route::DEFAULT_STRETCH)]
+        stretch: f64,
     },
 
     /// Display graph metadata (num nodes, num edges) without building the CCH.
@@ -234,6 +242,175 @@ fn init_tracing(log_format: &LogFormat, log_file: Option<&PathBuf>) -> Option<Wo
     guard
 }
 
+/// Color palette for multi-route GeoJSON visualization.
+const ROUTE_COLORS: &[&str] = &[
+    "#ff5500", "#0055ff", "#00aa44", "#aa00cc", "#cc8800", "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
+];
+
+/// Format multiple route answers as a GeoJSON FeatureCollection or JSON array.
+fn format_multi_result(
+    answers: &[hanoi_core::cch::QueryAnswer],
+    format: &OutputFormat,
+    demo: bool,
+) -> serde_json::Value {
+    match format {
+        OutputFormat::Geojson => {
+            let features: Vec<serde_json::Value> = answers
+                .iter()
+                .enumerate()
+                .map(|(idx, a)| {
+                    let coords: Vec<[f32; 2]> = a.coordinates.iter().map(|&(lat, lng)| [lng, lat]).collect();
+                    let mut props = serde_json::json!({
+                        "distance_ms": a.distance_ms,
+                        "distance_m": a.distance_m,
+                        "route_index": idx
+                    });
+                    if demo {
+                        let obj = props.as_object_mut().unwrap();
+                        let color = ROUTE_COLORS[idx % ROUTE_COLORS.len()];
+                        obj.insert("stroke".into(), serde_json::json!(color));
+                        obj.insert("stroke-width".into(), serde_json::json!(if idx == 0 { 10 } else { 6 }));
+                        obj.insert("fill".into(), serde_json::json!(color));
+                        obj.insert("fill-opacity".into(), serde_json::json!(0.3));
+                    }
+                    serde_json::json!({
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": coords
+                        },
+                        "properties": props
+                    })
+                })
+                .collect();
+            serde_json::json!({
+                "type": "FeatureCollection",
+                "features": features
+            })
+        }
+        OutputFormat::Json => {
+            let routes: Vec<serde_json::Value> = answers
+                .iter()
+                .map(|a| {
+                    serde_json::json!({
+                        "distance_ms": a.distance_ms,
+                        "distance_m": a.distance_m,
+                        "path_nodes": a.path,
+                        "coordinates": a.coordinates.iter().map(|&(lat, lng)| [lat, lng]).collect::<Vec<_>>(),
+                    })
+                })
+                .collect();
+            serde_json::to_value(routes).unwrap()
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_multi_query(
+    data_dir: &PathBuf,
+    line_graph: bool,
+    from_node: Option<u32>,
+    to_node: Option<u32>,
+    from_lat: Option<f32>,
+    from_lng: Option<f32>,
+    to_lat: Option<f32>,
+    to_lng: Option<f32>,
+    output_file: Option<PathBuf>,
+    output_format: &OutputFormat,
+    demo: bool,
+    alternatives: u32,
+    stretch: f64,
+) {
+    let answers = if line_graph {
+        let lg_dir = data_dir.join("line_graph");
+        let original_dir = data_dir.join("graph");
+        let perm_path = lg_dir.join("perms/cch_perm");
+
+        tracing::info!(?lg_dir, ?original_dir, "loading line graph");
+        let t0 = Instant::now();
+        let context = LineGraphCchContext::load_and_build(&lg_dir, &original_dir, &perm_path)
+            .expect("failed to load line graph");
+        tracing::info!(elapsed = ?t0.elapsed(), "DirectedCCH built");
+
+        let t1 = Instant::now();
+        let engine = LineGraphQueryEngine::new(&context);
+        tracing::info!(elapsed = ?t1.elapsed(), "initial customization + spatial index");
+
+        if let (Some(from), Some(to)) = (from_node, to_node) {
+            engine.multi_query(from, to, alternatives as usize, stretch)
+        } else if let (Some(flat), Some(flng), Some(tlat), Some(tlng)) = (from_lat, from_lng, to_lat, to_lng) {
+            match engine.multi_query_coords((flat, flng), (tlat, tlng), alternatives as usize, stretch) {
+                Ok(answers) => answers,
+                Err(rejection) => {
+                    tracing::error!(%rejection, "coordinate validation failed");
+                    std::process::exit(2);
+                }
+            }
+        } else {
+            tracing::error!("specify either --from-node/--to-node or coordinate flags");
+            std::process::exit(1);
+        }
+    } else {
+        let graph_dir = data_dir.join("graph");
+        let perm_path = graph_dir.join("perms/cch_perm");
+
+        tracing::info!(?graph_dir, "loading graph");
+        let t0 = Instant::now();
+        let context = CchContext::load_and_build(&graph_dir, &perm_path).expect("failed to load graph");
+        tracing::info!(elapsed = ?t0.elapsed(), "CCH built");
+
+        let t1 = Instant::now();
+        let engine = QueryEngine::new(&context);
+        tracing::info!(elapsed = ?t1.elapsed(), "initial customization + spatial index");
+
+        if let (Some(from), Some(to)) = (from_node, to_node) {
+            engine.multi_query(from, to, alternatives as usize, stretch)
+        } else if let (Some(flat), Some(flng), Some(tlat), Some(tlng)) = (from_lat, from_lng, to_lat, to_lng) {
+            match engine.multi_query_coords((flat, flng), (tlat, tlng), alternatives as usize, stretch) {
+                Ok(answers) => answers,
+                Err(rejection) => {
+                    tracing::error!(%rejection, "coordinate validation failed");
+                    std::process::exit(2);
+                }
+            }
+        } else {
+            tracing::error!("specify either --from-node/--to-node or coordinate flags");
+            std::process::exit(1);
+        }
+    };
+
+    if answers.is_empty() {
+        tracing::warn!("no routes found");
+        std::process::exit(1);
+    }
+
+    let output = format_multi_result(&answers, output_format, demo);
+    let output_str = serde_json::to_string_pretty(&output).unwrap();
+
+    let path = output_file.unwrap_or_else(|| {
+        let ts = chrono::Local::now().format("%Y-%m-%dT%H%M%S");
+        let ext = match output_format {
+            OutputFormat::Geojson => "geojson",
+            OutputFormat::Json => "json",
+        };
+        PathBuf::from(format!("query_{}.{}", ts, ext))
+    });
+
+    match std::fs::write(&path, format!("{}\n", output_str)) {
+        Ok(_) => {
+            tracing::info!(
+                num_routes = answers.len(),
+                output = %path.display(),
+                "multi-route query result"
+            );
+        }
+        Err(e) => {
+            tracing::error!(?path, error = %e, "failed to write output file");
+            std::process::exit(1);
+        }
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
     let _guard = init_tracing(&cli.log_format, cli.log_file.as_ref());
@@ -251,7 +428,26 @@ fn main() {
             output_file,
             output_format,
             demo,
+            alternatives,
+            stretch,
         } => {
+            if alternatives > 0 {
+                run_multi_query(
+                    &data_dir,
+                    line_graph,
+                    from_node,
+                    to_node,
+                    from_lat,
+                    from_lng,
+                    to_lat,
+                    to_lng,
+                    output_file,
+                    &output_format,
+                    demo,
+                    alternatives,
+                    stretch,
+                );
+            } else {
             let answer = if line_graph {
                 let lg_dir = data_dir.join("line_graph");
                 let original_dir = data_dir.join("graph");
@@ -358,6 +554,7 @@ fn main() {
                     std::process::exit(1);
                 }
             }
+            } // end else (single-query branch)
         }
 
         Command::Info {

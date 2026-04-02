@@ -13,6 +13,7 @@ use axum::routing::{get, post};
 use clap::{Parser, ValueEnum};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch};
+use tower_http::cors::CorsLayer;
 use tower_http::decompression::RequestDecompressionLayer;
 use tower_http::trace::TraceLayer;
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
@@ -261,6 +262,7 @@ async fn main() {
         .route("/info", get(handlers::handle_info))
         .route("/health", get(handlers::handle_health))
         .route("/ready", get(handlers::handle_ready))
+        .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state.clone());
 

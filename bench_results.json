@@ -1,0 +1,1228 @@
+[
+  {
+    "name": "http_info",
+    "timestamp": "2026-04-02T02:29:39.035976367Z",
+    "graph_dir": "",
+    "measurements": [
+      {
+        "label": "http_info_0",
+        "duration": {
+          "secs": 0,
+          "nanos": 356507
+        },
+        "metadata": {
+          "ms": 0.356507
+        }
+      },
+      {
+        "label": "http_info_1",
+        "duration": {
+          "secs": 0,
+          "nanos": 337170
+        },
+        "metadata": {
+          "ms": 0.33717
+        }
+      },
+      {
+        "label": "http_info_2",
+        "duration": {
+          "secs": 0,
+          "nanos": 322483
+        },
+        "metadata": {
+          "ms": 0.32248299999999996
+        }
+      },
+      {
+        "label": "http_info_3",
+        "duration": {
+          "secs": 0,
+          "nanos": 323795
+        },
+        "metadata": {
+          "ms": 0.323795
+        }
+      },
+      {
+        "label": "http_info_4",
+        "duration": {
+          "secs": 0,
+          "nanos": 330758
+        },
+        "metadata": {
+          "ms": 0.330758
+        }
+      },
+      {
+        "label": "http_info_5",
+        "duration": {
+          "secs": 0,
+          "nanos": 440553
+        },
+        "metadata": {
+          "ms": 0.440553
+        }
+      },
+      {
+        "label": "http_info_6",
+        "duration": {
+          "secs": 0,
+          "nanos": 427069
+        },
+        "metadata": {
+          "ms": 0.427069
+        }
+      },
+      {
+        "label": "http_info_7",
+        "duration": {
+          "secs": 0,
+          "nanos": 397974
+        },
+        "metadata": {
+          "ms": 0.397974
+        }
+      },
+      {
+        "label": "http_info_8",
+        "duration": {
+          "secs": 0,
+          "nanos": 374430
+        },
+        "metadata": {
+          "ms": 0.37443
+        }
+      },
+      {
+        "label": "http_info_9",
+        "duration": {
+          "secs": 0,
+          "nanos": 380181
+        },
+        "metadata": {
+          "ms": 0.380181
+        }
+      }
+    ],
+    "config": {
+      "warmup_iterations": 3,
+      "measured_iterations": 10,
+      "query_count": 100,
+      "seed": 42
+    }
+  },
+  {
+    "name": "http_query",
+    "timestamp": "2026-04-02T02:29:39.513535154Z",
+    "graph_dir": "",
+    "measurements": [
+      {
+        "label": "http_query_0",
+        "duration": {
+          "secs": 0,
+          "nanos": 3319224
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_1",
+        "duration": {
+          "secs": 0,
+          "nanos": 8937004
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_2",
+        "duration": {
+          "secs": 0,
+          "nanos": 1715688
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_3",
+        "duration": {
+          "secs": 0,
+          "nanos": 4094004
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_4",
+        "duration": {
+          "secs": 0,
+          "nanos": 4476217
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_5",
+        "duration": {
+          "secs": 0,
+          "nanos": 2674258
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_6",
+        "duration": {
+          "secs": 0,
+          "nanos": 4430190
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_7",
+        "duration": {
+          "secs": 0,
+          "nanos": 2062695
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_8",
+        "duration": {
+          "secs": 0,
+          "nanos": 4534244
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_9",
+        "duration": {
+          "secs": 0,
+          "nanos": 4353979
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_10",
+        "duration": {
+          "secs": 0,
+          "nanos": 4761592
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_11",
+        "duration": {
+          "secs": 0,
+          "nanos": 7849391
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_12",
+        "duration": {
+          "secs": 0,
+          "nanos": 4468752
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_13",
+        "duration": {
+          "secs": 0,
+          "nanos": 4433237
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_14",
+        "duration": {
+          "secs": 0,
+          "nanos": 2196346
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_15",
+        "duration": {
+          "secs": 0,
+          "nanos": 3923685
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_16",
+        "duration": {
+          "secs": 0,
+          "nanos": 8762156
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_17",
+        "duration": {
+          "secs": 0,
+          "nanos": 6033807
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_18",
+        "duration": {
+          "secs": 0,
+          "nanos": 4818256
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_19",
+        "duration": {
+          "secs": 0,
+          "nanos": 3259934
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_20",
+        "duration": {
+          "secs": 0,
+          "nanos": 10307918
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_21",
+        "duration": {
+          "secs": 0,
+          "nanos": 4239775
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_22",
+        "duration": {
+          "secs": 0,
+          "nanos": 9863859
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_23",
+        "duration": {
+          "secs": 0,
+          "nanos": 4919219
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_24",
+        "duration": {
+          "secs": 0,
+          "nanos": 3057930
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_25",
+        "duration": {
+          "secs": 0,
+          "nanos": 1964637
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_26",
+        "duration": {
+          "secs": 0,
+          "nanos": 3561719
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_27",
+        "duration": {
+          "secs": 0,
+          "nanos": 4547140
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_28",
+        "duration": {
+          "secs": 0,
+          "nanos": 4459480
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_29",
+        "duration": {
+          "secs": 0,
+          "nanos": 3453710
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_30",
+        "duration": {
+          "secs": 0,
+          "nanos": 2332470
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_31",
+        "duration": {
+          "secs": 0,
+          "nanos": 2266497
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_32",
+        "duration": {
+          "secs": 0,
+          "nanos": 3115364
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_33",
+        "duration": {
+          "secs": 0,
+          "nanos": 5004004
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_34",
+        "duration": {
+          "secs": 0,
+          "nanos": 4452373
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_35",
+        "duration": {
+          "secs": 0,
+          "nanos": 8048189
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_36",
+        "duration": {
+          "secs": 0,
+          "nanos": 5063453
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_37",
+        "duration": {
+          "secs": 0,
+          "nanos": 1678903
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_38",
+        "duration": {
+          "secs": 0,
+          "nanos": 2757290
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_39",
+        "duration": {
+          "secs": 0,
+          "nanos": 3682615
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_40",
+        "duration": {
+          "secs": 0,
+          "nanos": 3571025
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_41",
+        "duration": {
+          "secs": 0,
+          "nanos": 2877648
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_42",
+        "duration": {
+          "secs": 0,
+          "nanos": 2317817
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_43",
+        "duration": {
+          "secs": 0,
+          "nanos": 1809517
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_44",
+        "duration": {
+          "secs": 0,
+          "nanos": 2265003
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_45",
+        "duration": {
+          "secs": 0,
+          "nanos": 3973939
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_46",
+        "duration": {
+          "secs": 0,
+          "nanos": 1600222
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_47",
+        "duration": {
+          "secs": 0,
+          "nanos": 2339974
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_48",
+        "duration": {
+          "secs": 0,
+          "nanos": 3107575
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_49",
+        "duration": {
+          "secs": 0,
+          "nanos": 3368407
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_50",
+        "duration": {
+          "secs": 0,
+          "nanos": 3275944
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_51",
+        "duration": {
+          "secs": 0,
+          "nanos": 3573950
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_52",
+        "duration": {
+          "secs": 0,
+          "nanos": 2600710
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_53",
+        "duration": {
+          "secs": 0,
+          "nanos": 2911352
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_54",
+        "duration": {
+          "secs": 0,
+          "nanos": 2331027
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_55",
+        "duration": {
+          "secs": 0,
+          "nanos": 3190955
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_56",
+        "duration": {
+          "secs": 0,
+          "nanos": 5292945
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_57",
+        "duration": {
+          "secs": 0,
+          "nanos": 2270750
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_58",
+        "duration": {
+          "secs": 0,
+          "nanos": 2196682
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_59",
+        "duration": {
+          "secs": 0,
+          "nanos": 4133157
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_60",
+        "duration": {
+          "secs": 0,
+          "nanos": 3583579
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_61",
+        "duration": {
+          "secs": 0,
+          "nanos": 3963728
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_62",
+        "duration": {
+          "secs": 0,
+          "nanos": 2088494
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_63",
+        "duration": {
+          "secs": 0,
+          "nanos": 4240186
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_64",
+        "duration": {
+          "secs": 0,
+          "nanos": 2446303
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_65",
+        "duration": {
+          "secs": 0,
+          "nanos": 1921678
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_66",
+        "duration": {
+          "secs": 0,
+          "nanos": 5071195
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_67",
+        "duration": {
+          "secs": 0,
+          "nanos": 2561158
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_68",
+        "duration": {
+          "secs": 0,
+          "nanos": 2391641
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_69",
+        "duration": {
+          "secs": 0,
+          "nanos": 2815303
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_70",
+        "duration": {
+          "secs": 0,
+          "nanos": 5340993
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_71",
+        "duration": {
+          "secs": 0,
+          "nanos": 3893807
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_72",
+        "duration": {
+          "secs": 0,
+          "nanos": 1626169
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_73",
+        "duration": {
+          "secs": 0,
+          "nanos": 6293375
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_74",
+        "duration": {
+          "secs": 0,
+          "nanos": 4964790
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_75",
+        "duration": {
+          "secs": 0,
+          "nanos": 4752813
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_76",
+        "duration": {
+          "secs": 0,
+          "nanos": 3323953
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_77",
+        "duration": {
+          "secs": 0,
+          "nanos": 3696510
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_78",
+        "duration": {
+          "secs": 0,
+          "nanos": 6052655
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_79",
+        "duration": {
+          "secs": 0,
+          "nanos": 5240136
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_80",
+        "duration": {
+          "secs": 0,
+          "nanos": 8308390
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_81",
+        "duration": {
+          "secs": 0,
+          "nanos": 3288065
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_82",
+        "duration": {
+          "secs": 0,
+          "nanos": 1648952
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_83",
+        "duration": {
+          "secs": 0,
+          "nanos": 2378706
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_84",
+        "duration": {
+          "secs": 0,
+          "nanos": 3435363
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_85",
+        "duration": {
+          "secs": 0,
+          "nanos": 3141623
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_86",
+        "duration": {
+          "secs": 0,
+          "nanos": 2220301
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_87",
+        "duration": {
+          "secs": 0,
+          "nanos": 3895162
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_88",
+        "duration": {
+          "secs": 0,
+          "nanos": 4096578
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_89",
+        "duration": {
+          "secs": 0,
+          "nanos": 2135421
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_90",
+        "duration": {
+          "secs": 0,
+          "nanos": 8329889
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_91",
+        "duration": {
+          "secs": 0,
+          "nanos": 4937200
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_92",
+        "duration": {
+          "secs": 0,
+          "nanos": 5745550
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_93",
+        "duration": {
+          "secs": 0,
+          "nanos": 2201584
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_94",
+        "duration": {
+          "secs": 0,
+          "nanos": 2683956
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_95",
+        "duration": {
+          "secs": 0,
+          "nanos": 3879962
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_96",
+        "duration": {
+          "secs": 0,
+          "nanos": 3001621
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_97",
+        "duration": {
+          "secs": 0,
+          "nanos": 6405846
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_98",
+        "duration": {
+          "secs": 0,
+          "nanos": 3994588
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      },
+      {
+        "label": "http_query_99",
+        "duration": {
+          "secs": 0,
+          "nanos": 8124236
+        },
+        "metadata": {
+          "has_path": false,
+          "status": true
+        }
+      }
+    ],
+    "config": {
+      "warmup_iterations": 3,
+      "measured_iterations": 10,
+      "query_count": 100,
+      "seed": 42
+    }
+  }
+]

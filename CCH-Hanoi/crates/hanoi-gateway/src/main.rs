@@ -9,6 +9,7 @@ use axum::Router;
 use axum::routing::{get, post};
 use clap::Parser;
 use tokio::net::TcpListener;
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
@@ -143,6 +144,7 @@ async fn main() {
         .route("/query", post(proxy::handle_query))
         .route("/info", get(proxy::handle_info))
         .route("/profiles", get(proxy::handle_profiles))
+        .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

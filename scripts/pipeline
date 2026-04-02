@@ -67,7 +67,7 @@ echo "Starting CCH graph loader & generator pipeline..."
 MAP_SOURCE="$1"
 PROFILE="$2"
 
-REPO=~/VTS/Hanoi-Routing
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
 INPUT_PBF="$REPO/Maps/$MAP_SOURCE"
 MAP_BASENAME="$(basename "$MAP_SOURCE")"
 MAP_NAME="${MAP_BASENAME%.osm.pbf}"

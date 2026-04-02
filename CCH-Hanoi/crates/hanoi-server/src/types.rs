@@ -30,6 +30,11 @@ pub struct FormatParam {
     /// When present (any value or empty), adds simplestyle-spec visualization
     /// properties (stroke, stroke-width, fill, fill-opacity) to GeoJSON output.
     pub colors: Option<String>,
+    /// Number of alternative routes to return (0 or absent = single best route).
+    pub alternatives: Option<u32>,
+    /// Maximum stretch factor for alternative routes (e.g. 1.3 = 30% longer).
+    /// Defaults to 1.3 if omitted.
+    pub stretch: Option<f64>,
 }
 
 /// Query result returned as JSON.

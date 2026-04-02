@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CCH-Hanoi Query Interface</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1a1a2e; }
+  #map { width: 100%; height: 100vh; }
+
+  /* ---- Sidebar ---- */
+  .sidebar {
+    position: absolute; top: 0; left: 0; z-index: 1000;
+    width: 360px; height: 100vh; overflow-y: auto;
+    background: rgba(22, 22, 40, 0.97);
+    box-shadow: 4px 0 24px rgba(0,0,0,0.5);
+    backdrop-filter: blur(10px);
+    display: flex; flex-direction: column;
+    color: #e0e0e0;
+  }
+  .sidebar-header {
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .sidebar-header h1 {
+    font-size: 16px; color: #ff5500; margin-bottom: 2px;
+  }
+  .sidebar-header .sub { font-size: 11px; color: #888; }
+
+  .sidebar-body { padding: 14px 20px; flex: 1; overflow-y: auto; }
+
+  /* ---- Form groups ---- */
+  .form-group { margin-bottom: 14px; }
+  .form-group label {
+    display: block; font-size: 11px; font-weight: 600;
+    color: #aaa; text-transform: uppercase; letter-spacing: 0.6px;
+    margin-bottom: 5px;
+  }
+  .coord-row { display: flex; gap: 8px; }
+  .coord-row input { flex: 1; }
+
+  input, select {
+    width: 100%; padding: 8px 10px; border: 1px solid #333;
+    border-radius: 6px; background: #1e1e36; color: #fff;
+    font-size: 13px; outline: none; transition: border-color 0.15s;
+  }
+  input:focus, select:focus { border-color: #ff5500; }
+  input::placeholder { color: #555; }
+
+  .hint {
+    font-size: 10px; color: #666; margin-top: 4px;
+    line-height: 1.4;
+  }
+
+  /* ---- Buttons ---- */
+  .btn-row { display: flex; gap: 8px; margin-bottom: 14px; }
+  .btn {
+    flex: 1; padding: 10px 0; border: none; border-radius: 8px;
+    cursor: pointer; font-size: 13px; font-weight: 600;
+    transition: all 0.15s; text-align: center;
+  }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-query { background: #ff5500; color: #fff; }
+  .btn-query:hover:not(:disabled) { background: #ff6a1a; }
+  .btn-clear { background: #2a2a44; color: #ccc; }
+  .btn-clear:hover { background: #363655; }
+  .btn-swap { background: #2a2a44; color: #ffaa00; font-size: 16px; flex: 0 0 40px; }
+  .btn-swap:hover { background: #363655; }
+
+  /* ---- Point selector pills ---- */
+  .point-mode {
+    display: flex; gap: 6px; margin-bottom: 12px;
+  }
+  .pill {
+    flex: 1; padding: 8px; border: 2px solid transparent;
+    border-radius: 8px; cursor: pointer; text-align: center;
+    font-size: 12px; font-weight: 600; transition: all 0.15s;
+  }
+  .pill-from { background: rgba(0,200,83,0.1); color: #00c853; }
+  .pill-from.active { border-color: #00c853; background: rgba(0,200,83,0.18); }
+  .pill-to { background: rgba(255,23,68,0.1); color: #ff1744; }
+  .pill-to.active { border-color: #ff1744; background: rgba(255,23,68,0.18); }
+  .pill-none { background: rgba(255,255,255,0.04); color: #888; flex: 0 0 auto; padding: 8px 14px; }
+  .pill-none.active { border-color: #888; }
+
+  /* ---- Result card ---- */
+  .result-card {
+    background: rgba(255,255,255,0.04); border-radius: 8px;
+    padding: 12px 14px; margin-bottom: 10px; display: none;
+  }
+  .result-card h3 { font-size: 12px; color: #ff5500; margin-bottom: 8px; }
+  .result-row { display: flex; justify-content: space-between; margin: 4px 0; font-size: 13px; }
+  .result-row .rl { color: #999; }
+  .result-row .rv { color: #fff; font-weight: 600; }
+
+  .error-card {
+    background: rgba(255,23,68,0.1); border: 1px solid rgba(255,23,68,0.3);
+    border-radius: 8px; padding: 10px 14px; margin-bottom: 10px;
+    font-size: 12px; color: #ff6b6b; display: none;
+  }
+
+  /* ---- History ---- */
+  .history-section { border-top: 1px solid rgba(255,255,255,0.06); padding-top: 12px; margin-top: 8px; }
+  .history-section h3 { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .history-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px; border-radius: 6px; cursor: pointer;
+    font-size: 11px; color: #bbb; transition: background 0.1s;
+    margin-bottom: 4px;
+  }
+  .history-item:hover { background: rgba(255,255,255,0.05); }
+  .history-swatch { width: 16px; height: 3px; border-radius: 2px; flex-shrink: 0; }
+  .history-text { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .history-dist { color: #888; flex-shrink: 0; }
+  .history-del { color: #555; cursor: pointer; flex-shrink: 0; font-size: 14px; }
+  .history-del:hover { color: #ff1744; }
+
+  /* ---- Loading ---- */
+  .spinner {
+    display: inline-block; width: 14px; height: 14px;
+    border: 2px solid rgba(255,255,255,0.2);
+    border-top-color: #ff5500; border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    vertical-align: middle; margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ---- Map markers ---- */
+  .custom-marker {
+    width: 16px; height: 16px; border-radius: 50%;
+    border: 2.5px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  }
+  .marker-start { background: #00c853; }
+  .marker-end { background: #ff1744; }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 600px) {
+    .sidebar { width: 100%; height: 50vh; top: auto; bottom: 0; border-radius: 16px 16px 0 0; }
+    #map { height: 55vh; }
+  }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div class="sidebar">
+  <div class="sidebar-header">
+    <h1>🗺️ CCH-Hanoi Query</h1>
+    <div class="sub">Click bản đồ hoặc nhập tọa độ để truy vấn tuyến đường</div>
+  </div>
+
+  <div class="sidebar-body">
+    <!-- Server config -->
+    <div class="form-group">
+      <label>Server URL</label>
+      <input type="text" id="serverUrl" value="" placeholder="http://localhost:8081">
+      <div class="hint">Để trống nếu dùng serve_query_ui.py (auto-proxy). Điền URL nếu server có CORS.</div>
+    </div>
+
+    <!-- Map click mode -->
+    <div class="point-mode">
+      <div class="pill pill-from active" id="pillFrom" onclick="setClickMode('from')">📍 Điểm đi</div>
+      <div class="pill pill-to" id="pillTo" onclick="setClickMode('to')">🏁 Điểm đến</div>
+      <div class="pill pill-none" id="pillNone" onclick="setClickMode('none')">✋</div>
+    </div>
+    <div class="hint">Click trên bản đồ để chọn điểm, hoặc nhập tọa độ thủ công</div>
+
+    <!-- From coordinates -->
+    <div class="form-group">
+      <label>Điểm đi (lat, lng)</label>
+      <div class="coord-row">
+        <input type="text" id="fromLat" inputmode="decimal" placeholder="21.0283">
+        <input type="text" id="fromLng" inputmode="decimal" placeholder="105.8542">
+      </div>
+      <div class="hint">Paste "21.028, 105.854" vào ô lat để tự tách</div>
+    </div>
+
+    <!-- To coordinates -->
+    <div class="form-group">
+      <label>Điểm đến (lat, lng)</label>
+      <div class="coord-row">
+        <input type="text" id="toLat" inputmode="decimal" placeholder="20.998">
+        <input type="text" id="toLng" inputmode="decimal" placeholder="105.829">
+      </div>
+    </div>
+
+    <!-- Action buttons -->
+    <div class="btn-row">
+      <button class="btn btn-swap" id="btnSwap" title="Đổi chiều">⇅</button>
+      <button class="btn btn-query" id="btnQuery" onclick="runQuery()">Tìm đường</button>
+      <button class="btn btn-clear" id="btnClearAll" onclick="clearAll()">Xóa</button>
+    </div>
+
+    <!-- Error -->
+    <div class="error-card" id="errorCard"></div>
+
+    <!-- Result -->
+    <div class="result-card" id="resultCard">
+      <h3>Kết quả truy vấn</h3>
+      <div class="result-row"><span class="rl">Khoảng cách</span><span class="rv" id="resDist">—</span></div>
+      <div class="result-row"><span class="rl">Thời gian</span><span class="rv" id="resTime">—</span></div>
+      <div class="result-row"><span class="rl">Điểm trên tuyến</span><span class="rv" id="resPoints">—</span></div>
+      <div class="btn-row" style="margin-top:8px;margin-bottom:0">
+        <button class="btn btn-clear" onclick="exportGeoJson()">💾 Lưu GeoJSON</button>
+      </div>
+    </div>
+
+    <!-- History -->
+    <div class="history-section">
+      <h3>Lịch sử truy vấn</h3>
+      <div id="historyList"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---- Map setup ----
+const HANOI = [21.028, 105.854];
+const map = L.map('map', { zoomControl: false }).setView(HANOI, 13);
+L.control.zoom({ position: 'topright' }).addTo(map);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OSM', maxZoom: 19
+}).addTo(map);
+
+// ---- State ----
+let clickMode = 'from'; // 'from' | 'to' | 'none'
+let fromMarker = null, toMarker = null;
+let routeLayers = [];   // { layer, geojson, meta }
+let lastGeoJson = null;
+const COLORS = ['#ff5500','#2196f3','#4caf50','#e91e63','#ff9800','#9c27b0','#00bcd4'];
+
+// ---- Click mode ----
+function setClickMode(mode) {
+  clickMode = mode;
+  document.getElementById('pillFrom').classList.toggle('active', mode === 'from');
+  document.getElementById('pillTo').classList.toggle('active', mode === 'to');
+  document.getElementById('pillNone').classList.toggle('active', mode === 'none');
+  map.getContainer().style.cursor = mode === 'none' ? '' : 'crosshair';
+}
+
+function makeIcon(cls) {
+  return L.divIcon({
+    className: '',
+    html: '<div class="custom-marker ' + cls + '"></div>',
+    iconSize: [16, 16], iconAnchor: [8, 8]
+  });
+}
+
+// ---- Map click ----
+map.on('click', function(e) {
+  if (clickMode === 'none') return;
+  const { lat, lng } = e.latlng;
+  if (clickMode === 'from') {
+    document.getElementById('fromLat').value = lat.toFixed(6);
+    document.getElementById('fromLng').value = lng.toFixed(6);
+    if (fromMarker) map.removeLayer(fromMarker);
+    fromMarker = L.marker([lat, lng], { icon: makeIcon('marker-start'), draggable: true }).addTo(map);
+    fromMarker.on('dragend', function() {
+      const p = fromMarker.getLatLng();
+      document.getElementById('fromLat').value = p.lat.toFixed(6);
+      document.getElementById('fromLng').value = p.lng.toFixed(6);
+    });
+    // Auto-switch to "to" after setting "from"
+    setClickMode('to');
+  } else if (clickMode === 'to') {
+    document.getElementById('toLat').value = lat.toFixed(6);
+    document.getElementById('toLng').value = lng.toFixed(6);
+    if (toMarker) map.removeLayer(toMarker);
+    toMarker = L.marker([lat, lng], { icon: makeIcon('marker-end'), draggable: true }).addTo(map);
+    toMarker.on('dragend', function() {
+      const p = toMarker.getLatLng();
+      document.getElementById('toLat').value = p.lat.toFixed(6);
+      document.getElementById('toLng').value = p.lng.toFixed(6);
+    });
+    setClickMode('none');
+  }
+});
+
+// ---- Paste "lat, lng" handler ----
+function setupPasteHandler(latId, lngId) {
+  document.getElementById(latId).addEventListener('paste', function(e) {
+    var text = (e.clipboardData || window.clipboardData).getData('text').trim();
+    // Match: "21.028125030131562, 105.76711024086866" or "21.028 105.767" etc.
+    var m = text.match(/^([\-]?\d+\.?\d*)\s*[,;\s]\s*([\-]?\d+\.?\d*)$/);
+    if (m) {
+      e.preventDefault();
+      document.getElementById(latId).value = m[1];
+      document.getElementById(lngId).value = m[2];
+      document.getElementById(lngId).focus();
+    }
+  });
+}
+setupPasteHandler('fromLat', 'fromLng');
+setupPasteHandler('toLat', 'toLng');
+
+// ---- Swap ----
+document.getElementById('btnSwap').addEventListener('click', function() {
+  const fLat = document.getElementById('fromLat');
+  const fLng = document.getElementById('fromLng');
+  const tLat = document.getElementById('toLat');
+  const tLng = document.getElementById('toLng');
+  const tmp = [fLat.value, fLng.value];
+  fLat.value = tLat.value; fLng.value = tLng.value;
+  tLat.value = tmp[0]; tLng.value = tmp[1];
+  // Swap markers
+  if (fromMarker) fromMarker.setLatLng([+fLat.value, +fLng.value]);
+  if (toMarker) toMarker.setLatLng([+tLat.value, +tLng.value]);
+});
+
+// ---- Keyboard shortcut: Enter to query ----
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.ctrlKey && !e.shiftKey) {
+    const active = document.activeElement;
+    if (active && active.tagName === 'INPUT' && active.closest('.sidebar')) {
+      runQuery();
+    }
+  }
+});
+
+// ---- Query ----
+async function runQuery() {
+  const btn = document.getElementById('btnQuery');
+  const errCard = document.getElementById('errorCard');
+  const resCard = document.getElementById('resultCard');
+  errCard.style.display = 'none';
+  resCard.style.display = 'none';
+
+  const fromLat = parseFloat(document.getElementById('fromLat').value);
+  const fromLng = parseFloat(document.getElementById('fromLng').value);
+  const toLat = parseFloat(document.getElementById('toLat').value);
+  const toLng = parseFloat(document.getElementById('toLng').value);
+
+  if (isNaN(fromLat) || isNaN(fromLng) || isNaN(toLat) || isNaN(toLng)) {
+    errCard.textContent = 'Vui lòng nhập đầy đủ tọa độ điểm đi và điểm đến.';
+    errCard.style.display = 'block';
+    return;
+  }
+
+  const serverUrl = document.getElementById('serverUrl').value.replace(/\/+$/, '');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Đang tìm...';
+
+  try {
+    const resp = await fetch(serverUrl + '/query?colors', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from_lat: fromLat, from_lng: fromLng, to_lat: toLat, to_lng: toLng })
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error('HTTP ' + resp.status + ': ' + text);
+    }
+
+    const geojson = await resp.json();
+    lastGeoJson = geojson;
+    displayRoute(geojson, fromLat, fromLng, toLat, toLng);
+  } catch (err) {
+    errCard.textContent = 'Lỗi: ' + err.message;
+    errCard.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Tìm đường';
+  }
+}
+
+// ---- Display route ----
+function displayRoute(geojson, fromLat, fromLng, toLat, toLng) {
+  const features = geojson.features || [];
+  if (features.length === 0) return;
+
+  const group = L.featureGroup();
+  const colorIdx = routeLayers.length % COLORS.length;
+  let totalDist = 0, totalTime = 0, totalPoints = 0;
+
+  features.forEach(function(f) {
+    const coords = f.geometry.coordinates;
+    const props = f.properties || {};
+    const latlngs = coords.map(function(c) { return [c[1], c[0]]; });
+    totalPoints += latlngs.length;
+
+    L.polyline(latlngs, {
+      color: props.stroke || COLORS[colorIdx],
+      weight: Math.min(props['stroke-width'] || 6, 8),
+      opacity: 0.85, lineJoin: 'round', lineCap: 'round'
+    }).addTo(group);
+
+    if (props.distance_m) totalDist += props.distance_m;
+    if (props.distance_ms) totalTime += props.distance_ms;
+  });
+
+  // Start/end markers on route
+  const allCoords = features.flatMap(function(f) { return f.geometry.coordinates; });
+  if (allCoords.length >= 2) {
+    L.marker([allCoords[0][1], allCoords[0][0]], { icon: makeIcon('marker-start') }).addTo(group);
+    const last = allCoords[allCoords.length - 1];
+    L.marker([last[1], last[0]], { icon: makeIcon('marker-end') }).addTo(group);
+  }
+
+  group.addTo(map);
+  map.fitBounds(group.getBounds().pad(0.08));
+
+  const meta = {
+    fromLat: fromLat, fromLng: fromLng, toLat: toLat, toLng: toLng,
+    distance: totalDist, time: totalTime, points: totalPoints,
+    color: features[0]?.properties?.stroke || COLORS[colorIdx]
+  };
+  routeLayers.push({ layer: group, geojson: geojson, meta: meta });
+
+  // Update result card
+  document.getElementById('resDist').textContent = formatDistance(totalDist);
+  document.getElementById('resTime').textContent = formatDuration(totalTime);
+  document.getElementById('resPoints').textContent = totalPoints.toLocaleString();
+  document.getElementById('resultCard').style.display = 'block';
+
+  updateHistory();
+}
+
+// ---- Helpers ----
+function formatDuration(ms) {
+  var s = Math.round(ms / 1000);
+  var m = Math.floor(s / 60); s = s % 60;
+  if (m === 0) return s + 's';
+  return m + ' phút ' + s + 's';
+}
+function formatDistance(m) {
+  if (m < 1000) return Math.round(m) + ' m';
+  return (m / 1000).toFixed(2) + ' km';
+}
+
+// ---- Export ----
+function exportGeoJson() {
+  if (!lastGeoJson) return;
+  var blob = new Blob([JSON.stringify(lastGeoJson, null, 2)], { type: 'application/geo+json' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'query_' + new Date().toISOString().replace(/[:.]/g, '').slice(0, 15) + '.geojson';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ---- History ----
+function updateHistory() {
+  var list = document.getElementById('historyList');
+  list.innerHTML = '';
+  routeLayers.forEach(function(r, i) {
+    var m = r.meta;
+    var item = document.createElement('div');
+    item.className = 'history-item';
+    item.innerHTML =
+      '<div class="history-swatch" style="background:' + m.color + '"></div>' +
+      '<span class="history-text">' + m.fromLat.toFixed(4) + ',' + m.fromLng.toFixed(4) +
+      ' → ' + m.toLat.toFixed(4) + ',' + m.toLng.toFixed(4) + '</span>' +
+      '<span class="history-dist">' + formatDistance(m.distance) + '</span>' +
+      '<span class="history-del" data-idx="' + i + '">✕</span>';
+    // Click to fit
+    item.querySelector('.history-text').addEventListener('click', function() {
+      map.fitBounds(r.layer.getBounds().pad(0.08));
+    });
+    // Delete single
+    item.querySelector('.history-del').addEventListener('click', function(e) {
+      e.stopPropagation();
+      map.removeLayer(routeLayers[i].layer);
+      routeLayers.splice(i, 1);
+      updateHistory();
+    });
+    list.appendChild(item);
+  });
+}
+
+// ---- Clear all ----
+function clearAll() {
+  routeLayers.forEach(function(r) { map.removeLayer(r.layer); });
+  routeLayers = [];
+  if (fromMarker) { map.removeLayer(fromMarker); fromMarker = null; }
+  if (toMarker) { map.removeLayer(toMarker); toMarker = null; }
+  document.getElementById('fromLat').value = '';
+  document.getElementById('fromLng').value = '';
+  document.getElementById('toLat').value = '';
+  document.getElementById('toLng').value = '';
+  document.getElementById('resultCard').style.display = 'none';
+  document.getElementById('errorCard').style.display = 'none';
+  lastGeoJson = null;
+  updateHistory();
+  setClickMode('from');
+}
+
+// Initialization
+setClickMode('from');
+</script>
+</body>
+</html>

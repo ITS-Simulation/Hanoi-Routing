@@ -16,6 +16,10 @@ pub struct QueryMsg {
     pub format: Option<String>,
     /// Whether to include simplestyle-spec color properties in GeoJSON output.
     pub colors: bool,
+    /// Number of alternative routes to return (0 = single best route).
+    pub alternatives: u32,
+    /// Maximum stretch factor for alternative routes.
+    pub stretch: f64,
     pub reply: tokio::sync::oneshot::Sender<Result<serde_json::Value, CoordRejection>>,
 }
 

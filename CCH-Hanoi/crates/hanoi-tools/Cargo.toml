@@ -13,3 +13,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 [[bin]]
 name = "generate_line_graph"
 path = "src/bin/generate_line_graph.rs"
+
+[[bin]]
+name = "diagnose_turn"
+path = "src/bin/diagnose_turn.rs"

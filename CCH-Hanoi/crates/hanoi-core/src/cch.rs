@@ -11,6 +11,7 @@ use rust_road_router::io::Load;
 use crate::bounds::{BoundingBox, CoordRejection, ValidationConfig};
 use crate::geometry::TurnAnnotation;
 use crate::graph::GraphData;
+use crate::multi_route::{GEO_OVER_REQUEST, MAX_GEO_RATIO, MultiRouteServer};
 use crate::spatial::{SNAP_MAX_CANDIDATES, SpatialIndex};
 
 /// Answer from a shortest-path query.
@@ -229,6 +230,107 @@ impl<'a> QueryEngine<'a> {
         answer.origin = Some(from);
         answer.destination = Some(to);
         answer
+    }
+
+    /// Find up to `max_alternatives` alternative routes by node IDs.
+    pub fn multi_query(
+        &self,
+        from: NodeId,
+        to: NodeId,
+        max_alternatives: usize,
+        stretch_factor: f64,
+    ) -> Vec<QueryAnswer> {
+        let customized = self.server.customized();
+        let mut multi = MultiRouteServer::new(customized);
+        let request_count = max_alternatives.saturating_mul(GEO_OVER_REQUEST).max(max_alternatives + 10);
+        let candidates = multi.multi_query(from, to, request_count, stretch_factor);
+
+        let mut results: Vec<QueryAnswer> = Vec::with_capacity(max_alternatives);
+        let mut shortest_geo_dist: Option<f64> = None;
+
+        for alt in candidates {
+            if results.len() >= max_alternatives {
+                break;
+            }
+            if alt.path.is_empty() {
+                continue;
+            }
+            let coordinates: Vec<(f32, f32)> = alt
+                .path
+                .iter()
+                .map(|&node| {
+                    (
+                        self.context.graph.latitude[node as usize],
+                        self.context.graph.longitude[node as usize],
+                    )
+                })
+                .collect();
+            let distance_m = route_distance_m(&coordinates);
+
+            if let Some(base) = shortest_geo_dist {
+                if distance_m > base * MAX_GEO_RATIO {
+                    continue;
+                }
+            } else {
+                shortest_geo_dist = Some(distance_m);
+            }
+
+            results.push(QueryAnswer {
+                distance_ms: alt.distance,
+                distance_m,
+                path: alt.path,
+                coordinates,
+                turns: vec![],
+                origin: None,
+                destination: None,
+            });
+        }
+
+        results
+    }
+
+    /// Find up to `max_alternatives` alternative routes by coordinates.
+    pub fn multi_query_coords(
+        &self,
+        from: (f32, f32),
+        to: (f32, f32),
+        max_alternatives: usize,
+        stretch_factor: f64,
+    ) -> Result<Vec<QueryAnswer>, CoordRejection> {
+        let src_snaps = self.spatial.validated_snap_candidates(
+            "origin",
+            from.0,
+            from.1,
+            &self.validation_config,
+            SNAP_MAX_CANDIDATES,
+        )?;
+        let dst_snaps = self.spatial.validated_snap_candidates(
+            "destination",
+            to.0,
+            to.1,
+            &self.validation_config,
+            SNAP_MAX_CANDIDATES,
+        )?;
+
+        for src in &src_snaps {
+            for dst in &dst_snaps {
+                let answers = self.multi_query(
+                    src.nearest_node(),
+                    dst.nearest_node(),
+                    max_alternatives,
+                    stretch_factor,
+                );
+                if !answers.is_empty() {
+                    let patched: Vec<QueryAnswer> = answers
+                        .into_iter()
+                        .map(|a| Self::patch_coordinates(a, from, to))
+                        .collect();
+                    return Ok(patched);
+                }
+            }
+        }
+
+        Ok(Vec::new())
     }
 
     /// Apply new weights and re-customize. The CCH topology is reused.

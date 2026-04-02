@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CCH-Hanoi Route Visualizer</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; }
+  #map { width: 100%; height: 100vh; }
+
+  .controls {
+    position: absolute; top: 12px; left: 60px; z-index: 1000;
+    background: rgba(26, 26, 46, 0.95); border-radius: 10px;
+    padding: 14px 18px; min-width: 320px; max-width: 420px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    backdrop-filter: blur(8px);
+  }
+  .controls h2 { font-size: 15px; margin-bottom: 10px; color: #ff5500; letter-spacing: 0.5px; }
+
+  .drop-zone {
+    border: 2px dashed #555; border-radius: 8px; padding: 24px 12px;
+    text-align: center; cursor: pointer; transition: all 0.2s;
+    margin-bottom: 10px; font-size: 13px; color: #999;
+  }
+  .drop-zone.hover { border-color: #ff5500; background: rgba(255, 85, 0, 0.08); color: #ff5500; }
+  .drop-zone input { display: none; }
+
+  .route-info {
+    font-size: 12px; line-height: 1.7; margin-top: 8px;
+    padding: 8px 10px; background: rgba(255,255,255,0.04); border-radius: 6px;
+    display: none;
+  }
+  .route-info .label { color: #999; }
+  .route-info .value { color: #fff; font-weight: 600; }
+  .route-info .file-name { color: #ffaa00; font-size: 11px; word-break: break-all; }
+
+  .btn-row { display: flex; gap: 8px; margin-top: 10px; }
+  .btn {
+    flex: 1; padding: 7px 0; border: none; border-radius: 6px; cursor: pointer;
+    font-size: 12px; font-weight: 600; transition: all 0.15s;
+  }
+  .btn-clear { background: #333; color: #ccc; }
+  .btn-clear:hover { background: #444; }
+  .btn-fit { background: #ff5500; color: #fff; }
+  .btn-fit:hover { background: #ff6a1a; }
+
+  .legend {
+    position: absolute; bottom: 24px; left: 12px; z-index: 1000;
+    background: rgba(26, 26, 46, 0.92); border-radius: 8px;
+    padding: 10px 14px; font-size: 11px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+    display: none;
+  }
+  .legend-item { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+  .legend-swatch { width: 24px; height: 4px; border-radius: 2px; }
+
+  .marker-start { background: #00c853; }
+  .marker-end { background: #ff1744; }
+  .custom-marker {
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div class="controls">
+  <h2>🗺️ CCH-Hanoi Route Visualizer</h2>
+  <div class="drop-zone" id="dropZone">
+    <div>Kéo thả file <b>.geojson</b> vào đây<br>hoặc <u>click để chọn file</u></div>
+    <input type="file" id="fileInput" accept=".geojson,.json" multiple>
+  </div>
+  <div class="route-info" id="routeInfo"></div>
+  <div class="btn-row">
+    <button class="btn btn-clear" id="btnClear">Xóa tất cả</button>
+    <button class="btn btn-fit" id="btnFit">Fit bản đồ</button>
+  </div>
+</div>
+
+<div class="legend" id="legend"></div>
+
+<script>
+const HANOI_CENTER = [21.028, 105.854];
+const map = L.map('map', { zoomControl: false }).setView(HANOI_CENTER, 13);
+
+L.control.zoom({ position: 'topright' }).addTo(map);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors',
+  maxZoom: 19
+}).addTo(map);
+
+const routeLayers = [];
+const routeMeta = [];
+const defaultColors = ['#ff5500', '#2196f3', '#4caf50', '#e91e63', '#ff9800', '#9c27b0', '#00bcd4', '#cddc39'];
+
+function formatDuration(ms) {
+  const totalSec = Math.round(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  if (min === 0) return sec + 's';
+  return min + ' phút ' + sec + 's';
+}
+
+function formatDistance(m) {
+  if (m < 1000) return Math.round(m) + ' m';
+  return (m / 1000).toFixed(2) + ' km';
+}
+
+function makeMarker(latlng, cssClass, label) {
+  const icon = L.divIcon({
+    className: '',
+    html: '<div class="custom-marker ' + cssClass + '" title="' + label + '"></div>',
+    iconSize: [14, 14],
+    iconAnchor: [7, 7]
+  });
+  return L.marker(latlng, { icon: icon });
+}
+
+function addRoute(geojson, fileName) {
+  const group = L.featureGroup();
+  const features = geojson.features || (geojson.type === 'Feature' ? [geojson] : []);
+  if (features.length === 0) return;
+
+  const colorIdx = routeLayers.length % defaultColors.length;
+  let totalDistance = 0;
+  let totalTime = 0;
+  let allCoords = [];
+
+  features.forEach((f, i) => {
+    const coords = f.geometry.coordinates;
+    const props = f.properties || {};
+    const stroke = props.stroke || defaultColors[colorIdx];
+    const weight = props['stroke-width'] || 6;
+
+    const latlngs = coords.map(c => [c[1], c[0]]);
+    allCoords = allCoords.concat(latlngs);
+
+    L.polyline(latlngs, {
+      color: stroke,
+      weight: Math.min(weight, 8),
+      opacity: 0.85,
+      lineJoin: 'round',
+      lineCap: 'round'
+    }).addTo(group);
+
+    if (props.distance_m) totalDistance += props.distance_m;
+    if (props.distance_ms) totalTime += props.distance_ms;
+  });
+
+  // Start / end markers
+  if (allCoords.length >= 2) {
+    makeMarker(allCoords[0], 'marker-start', 'Điểm đi').addTo(group);
+    makeMarker(allCoords[allCoords.length - 1], 'marker-end', 'Điểm đến').addTo(group);
+  }
+
+  group.addTo(map);
+  routeLayers.push(group);
+  routeMeta.push({ name: fileName, distance: totalDistance, time: totalTime, color: features[0]?.properties?.stroke || defaultColors[colorIdx] });
+
+  updateInfo();
+  map.fitBounds(group.getBounds().pad(0.1));
+}
+
+function updateInfo() {
+  const info = document.getElementById('routeInfo');
+  const legend = document.getElementById('legend');
+
+  if (routeMeta.length === 0) {
+    info.style.display = 'none';
+    legend.style.display = 'none';
+    return;
+  }
+
+  info.style.display = 'block';
+  let html = '';
+  routeMeta.forEach((r, i) => {
+    html += '<div class="file-name">' + (i + 1) + '. ' + r.name + '</div>';
+    html += '<span class="label">Khoảng cách:</span> <span class="value">' + formatDistance(r.distance) + '</span>';
+    if (r.time > 0) html += ' &nbsp;|&nbsp; <span class="label">Thời gian:</span> <span class="value">' + formatDuration(r.time) + '</span>';
+    html += '<br>';
+  });
+  info.innerHTML = html;
+
+  // Legend
+  if (routeMeta.length > 0) {
+    legend.style.display = 'block';
+    legend.innerHTML = routeMeta.map((r, i) =>
+      '<div class="legend-item"><div class="legend-swatch" style="background:' + r.color + '"></div>' + r.name.replace(/\.geojson$/i, '') + '</div>'
+    ).join('');
+  }
+}
+
+// --- File handling ---
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+
+function handleFiles(files) {
+  Array.from(files).forEach(file => {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        const geojson = JSON.parse(e.target.result);
+        addRoute(geojson, file.name);
+      } catch (err) {
+        alert('Lỗi đọc file: ' + file.name + '\n' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  });
+}
+
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('hover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('hover'));
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('hover');
+  handleFiles(e.dataTransfer.files);
+});
+
+// --- Buttons ---
+document.getElementById('btnClear').addEventListener('click', () => {
+  routeLayers.forEach(l => map.removeLayer(l));
+  routeLayers.length = 0;
+  routeMeta.length = 0;
+  updateInfo();
+});
+
+document.getElementById('btnFit').addEventListener('click', () => {
+  if (routeLayers.length === 0) return;
+  const all = L.featureGroup(routeLayers);
+  map.fitBounds(all.getBounds().pad(0.1));
+});
+
+// --- Auto-load from URL params: ?file=path.geojson ---
+const params = new URLSearchParams(window.location.search);
+const paramFile = params.get('file');
+if (paramFile) {
+  fetch(paramFile)
+    .then(r => r.json())
+    .then(geojson => addRoute(geojson, paramFile.split('/').pop()))
+    .catch(e => console.warn('Could not auto-load:', e));
+}
+</script>
+</body>
+</html>

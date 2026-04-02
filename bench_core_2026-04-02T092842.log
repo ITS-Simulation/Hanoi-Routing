@@ -1,0 +1,5 @@
+{"timestamp":"2026-04-02T02:28:42.364584Z","level":"INFO","fields":{"message":"benchmark logging initialized","log_file":"bench_core_2026-04-02T092842.log"},"target":"hanoi_bench::log"}
+{"timestamp":"2026-04-02T02:28:42.364699Z","level":"INFO","fields":{"message":"loading graph","graph_dir":"/mnt/c/ITS/Routing/Hanoi-Routing/Maps/data/hanoi_motorcycle/graph"},"target":"bench_core"}
+{"timestamp":"2026-04-02T02:28:42.683482Z","level":"INFO","fields":{"message":"building CCH","num_nodes":929366,"num_edges":1942872},"target":"hanoi_core::cch","span":{"graph_dir":"/mnt/c/ITS/Routing/Hanoi-Routing/Maps/data/hanoi_motorcycle/graph","name":"load_and_build"},"spans":[{"graph_dir":"/mnt/c/ITS/Routing/Hanoi-Routing/Maps/data/hanoi_motorcycle/graph","name":"load_and_build"}]}
+{"timestamp":"2026-04-02T02:28:43.732448Z","level":"INFO","fields":{"message":"generating random queries","count":100,"seed":42},"target":"bench_core"}
+{"timestamp":"2026-04-02T02:28:43.739583Z","level":"INFO","fields":{"message":"saved queries","count":100,"path":"/mnt/c/ITS/Routing/Hanoi-Routing/Maps/data/hanoi_motorcycle/test_results/bench_queries.json"},"target":"bench_core"}

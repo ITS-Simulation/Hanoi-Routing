@@ -1,0 +1,5 @@
+{"timestamp":"2026-04-02T02:29:38.924892Z","level":"INFO","fields":{"message":"benchmark logging initialized","log_file":"bench_server_2026-04-02T092938.log"},"target":"hanoi_bench::log"}
+{"timestamp":"2026-04-02T02:29:38.925002Z","level":"INFO","fields":{"message":"loading queries","path":"/mnt/c/ITS/Routing/Hanoi-Routing/Maps/data/hanoi_motorcycle/test_results/bench_queries.json"},"target":"bench_server"}
+{"timestamp":"2026-04-02T02:29:38.929106Z","level":"INFO","fields":{"message":"benchmarking GET /info"},"target":"bench_server"}
+{"timestamp":"2026-04-02T02:29:39.036018Z","level":"INFO","fields":{"message":"benchmarking POST /query (sequential)","query_count":100},"target":"bench_server"}
+{"timestamp":"2026-04-02T02:29:39.517710Z","level":"INFO","fields":{"message":"results saved","path":"bench_results.json"},"target":"bench_server"}

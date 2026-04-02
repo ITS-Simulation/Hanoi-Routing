@@ -5,6 +5,7 @@ pub mod cch;
 pub mod geometry;
 pub mod graph;
 pub mod line_graph;
+pub mod multi_route;
 pub mod spatial;
 pub mod via_way_restriction;
 

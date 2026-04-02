@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-# Move to the repo directory
-cd /home/thomas/VTS/Hanoi-Routing/CCH-Generator || exit 1
+# Move to the CCH-Generator directory (relative to this script)
+cd "$(dirname "$0")/.." || exit 1
 
 # Make sure the build & lib directory exists
 mkdir -p build lib

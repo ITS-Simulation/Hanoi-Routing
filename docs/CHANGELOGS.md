@@ -1,5 +1,113 @@
 # CHANGELOGS.md
 
+## 2026-04-04 — hanoi-tools: Add diagnose_turn diagnostic binary
+
+- **`hanoi-tools/src/bin/diagnose_turn.rs`** (NEW): CLI tool for inspecting
+  forbidden turns and via-way restrictions near a coordinate. Loads original
+  graph CSR, forbidden turn pairs, and via-way chains. Finds nearby nodes,
+  lists all incoming/outgoing edges, reports which turns are forbidden, shows
+  via-way chain involvement, and classifies turn angles. Supports optional
+  `--line-graph` flag for line graph connectivity inspection.
+- **`hanoi-tools/Cargo.toml`**: Added `[[bin]]` entry for `diagnose_turn`.
+
+## 2026-04-03 — docs: Multi-route algorithm detailed analysis
+
+- **`docs/walkthrough/multi_route_algorithm_analysis.md`** (NEW): Chi tiết luồng
+  xử lý tìm nhiều đường đi thay thế — phân tích Phase 1 (collect meeting nodes
+  qua bidirectional elimination tree walk), Phase 2 (reconstruct + unpack path),
+  Phase 3 (Jaccard diversity filter). So sánh với original query.rs, chỉ ra các
+  điểm khác biệt (không reset distance, clone parents), rủi ro (parent pointer
+  collision, pruning ảnh hưởng chất lượng), và hướng cải thiện.
+
+## 2026-04-03 — hanoi: Multi-route alternative query via CCH meeting nodes
+
+- **`hanoi-core/src/multi_route.rs`** (NEW): Core multi-route algorithm using
+  bidirectional elimination tree walk. Captures all meeting nodes within a
+  configurable stretch factor, reconstructs candidate paths via parent pointers
+  and shortcut unpacking, then applies Jaccard diversity filter. Constants:
+  `DEFAULT_STRETCH = 1.3`, `OVERLAP_THRESHOLD = 0.80`.
+- **`hanoi-core/src/cch.rs`**: Added `multi_query()` and `multi_query_coords()`
+  to `QueryEngine` for normal-graph multi-route queries.
+- **`hanoi-core/src/line_graph.rs`**: Added `multi_query()`,
+  `multi_query_coords()`, and `build_answer_from_lg_path()` to
+  `LineGraphQueryEngine` with source-edge correction and turn annotation.
+- **`hanoi-server/src/types.rs`**: Added `alternatives` and `stretch` to
+  `FormatParam` query parameters.
+- **`hanoi-server/src/state.rs`**: Added `alternatives` and `stretch` fields to
+  `QueryMsg`.
+- **`hanoi-server/src/handlers.rs`**: Passes `alternatives`/`stretch` through
+  `QueryMsg` construction.
+- **`hanoi-server/src/engine.rs`**: Multi-route dispatch in `dispatch_normal()`
+  and `dispatch_line_graph()`. New `format_multi_response()` and
+  `answers_to_geojson()` producing multi-Feature GeoJSON with per-route colors.
+- **`hanoi-cli/src/main.rs`**: Added `--alternatives` and `--stretch` CLI flags.
+  New `run_multi_query()` and `format_multi_result()` functions for multi-route
+  output.
+- **`scripts/multi_query_ui.html`** (NEW): Browser-based multi-route query UI.
+  Same input flow as `query_ui.html` (click map / enter coords) plus
+  alternatives count and stretch factor controls. Displays per-route result
+  cards with color-coded legend, distance comparison (% vs optimal), summary
+  panel, click-to-highlight, toggle visibility, GeoJSON export, and query
+  history with colored dots.
+
+## 2026-04-02 — scripts: Interactive query interface + CORS
+
+- **`scripts/query_ui.html`**: Browser-based routing query interface. Click on
+  map to set start/end points (draggable markers), sends POST to hanoi-server,
+  displays route with distance/time stats, query history with per-route
+  delete/zoom, swap direction, GeoJSON export, keyboard Enter shortcut.
+- **`hanoi-server`**: Added `CorsLayer::permissive()` to query router so
+  browser-based UIs can call the API cross-origin.
+- **`hanoi-gateway`**: Added `cors` feature to tower-http and `CorsLayer` to
+  gateway router for the same reason.
+
+## 2026-04-02 — scripts: Route visualization tool
+
+- **`scripts/visualize_route.html`**: Interactive Leaflet-based map viewer for
+  GeoJSON query results. Supports drag-and-drop of multiple files, displays route
+  line with start/end markers, shows distance/duration info, legend, and auto-fit.
+- **`scripts/visualize_route.sh`**: Bash launcher — opens HTML directly or starts
+  a local HTTP server to auto-load specified .geojson files.
+- **`scripts/visualize_route.ps1`**: PowerShell equivalent for Windows.
+- **`scripts/query_and_view.sh`**: Bash wrapper — runs `cch-hanoi query` then
+  auto-opens the result in the visualizer. Configurable via env vars (PROFILE,
+  DATA_DIR, NO_VIEW).
+- **`scripts/query_and_view.ps1`**: PowerShell equivalent, auto-detects WSL
+  fallback when no Windows binary exists.
+
+## 2026-04-02 — docs: Deployment/installation guide and usage guide (Vietnamese)
+
+- **`docs/Hướng dẫn cài đặt triển khai.md`**: Added Vietnamese deployment guide
+  covering system requirements, WSL/Ubuntu environment setup, full build chain
+  (RoutingKit → CCH-Generator → InertialFlowCutter → CCH-Hanoi), 5-phase graph
+  pipeline execution, server startup (normal + line-graph modes), test suite,
+  gateway multi-profile deployment, production setup (systemd, nginx, K8s probes),
+  data directory layout, and troubleshooting reference.
+- **`docs/Hướng dẫn sử dụng.md`**: Added Vietnamese usage guide covering HTTP API
+  reference (query/info/health/ready/customize endpoints), CLI reference (cch-hanoi
+  query and info subcommands), weight customization workflow with Python example,
+  benchmark suite (bench_core, bench_server, bench_report), gateway multi-profile
+  usage, output format details (GeoJSON vs JSON), common operational workflows
+  (map update, add profile, live weights, regression testing), and reference
+  performance numbers for Hanoi motorcycle graph.
+
+---
+
+## 2026-04-01 — docs: Vietnamese documentation reading guide
+
+- **`docs/Hướng dẫn đọc tài liệu và source.md`**: Added Vietnamese README
+  covering project overview, directory structure, documentation reading
+  roadmap (4 progressive steps), source code reading order per component
+  (CCH-Generator, CCH-Hanoi, rust_road_router, RoutingKit), design docs
+  index grouped by topic, planned features summary, and role-based
+  approach suggestions (operator / backend dev / algorithm researcher).
+  Added deployment guide sections: system prerequisites, step-by-step
+  build instructions (RoutingKit → CCH-Generator → IFC → CCH-Hanoi),
+  5-phase data pipeline (OSM → base graph → conditional turns → line
+  graph → IFC ordering), server startup (normal/line-graph modes),
+  gateway configuration, CLI usage, environment variables (RUST_LOG),
+  common troubleshooting table, and production deployment architecture.
+
 ## 2026-03-29 — CCH-Hanoi: Reset turn-generation pipeline to raw output
 
 - **`CCH-Hanoi/crates/hanoi-core/src/geometry.rs`**: Wiped all turn
