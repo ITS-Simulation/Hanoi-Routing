@@ -1,12 +1,16 @@
+mod camera_overlay;
 mod engine;
 mod handlers;
+mod route_eval;
 mod state;
+mod traffic;
 mod types;
+mod ui;
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::{Arc, RwLock};
 
 use axum::Router;
 use axum::routing::{get, post};
@@ -25,7 +29,10 @@ use hanoi_core::cch::CchContext;
 use hanoi_core::line_graph::LineGraphCchContext;
 use rust_road_router::datastr::graph::Weight;
 
+use crate::camera_overlay::CameraOverlay;
+use crate::route_eval::RouteEvaluator;
 use crate::state::{AppState, QueryMsg};
+use crate::traffic::TrafficOverlay;
 use crate::types::BboxInfo;
 
 // ---------------------------------------------------------------------------
@@ -61,6 +68,10 @@ struct Args {
     #[arg(long)]
     original_graph_dir: Option<PathBuf>,
 
+    /// Camera YAML file used by the optional camera overlay.
+    #[arg(long, default_value = "CCH_Data_Pipeline/config/mvp_camera.yaml")]
+    camera_config: PathBuf,
+
     /// Port for the query API (REST/JSON)
     #[arg(long, default_value = "8080")]
     query_port: u16,
@@ -68,6 +79,11 @@ struct Args {
     /// Port for the customization API (REST/binary)
     #[arg(long, default_value = "9080")]
     customize_port: u16,
+
+    /// Serve the bundled route-viewer UI on the query port.
+    /// When omitted, the server exposes only the API endpoints.
+    #[arg(long)]
+    serve_ui: bool,
 
     /// Enable line-graph mode (uses DirectedCCH, final-edge correction)
     #[arg(long)]
@@ -167,6 +183,20 @@ fn init_tracing(log_format: &LogFormat, log_dir: Option<&Path>) -> Option<Worker
     guard
 }
 
+fn resolve_repo_relative_path(path: &Path) -> PathBuf {
+    if path.is_absolute() || path.exists() {
+        return path.to_path_buf();
+    }
+
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let repo_relative = repo_root.join(path);
+    if repo_relative.exists() {
+        return repo_relative;
+    }
+
+    path.to_path_buf()
+}
+
 // ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
@@ -175,6 +205,7 @@ fn init_tracing(log_format: &LogFormat, log_dir: Option<&Path>) -> Option<Worker
 async fn main() {
     let args = Args::parse();
     let _guard = init_tracing(&args.log_format, args.log_dir.as_deref());
+    let camera_config_path = resolve_repo_relative_path(&args.camera_config);
 
     let (query_tx, mut query_rx) = mpsc::channel::<QueryMsg>(256);
     let (watch_tx, mut watch_rx) = watch::channel::<Option<Vec<Weight>>>(None);
@@ -184,7 +215,15 @@ async fn main() {
     let queries_processed = Arc::new(AtomicU64::new(0));
 
     // Load graph and build CCH, then spawn background engine thread
-    let (num_nodes, num_edges, bbox) = if args.line_graph {
+    let (
+        num_nodes,
+        num_edges,
+        bbox,
+        traffic_overlay,
+        route_evaluator,
+        camera_overlay,
+        baseline_weights,
+    ) = if args.line_graph {
         let original_dir = args
             .original_graph_dir
             .as_ref()
@@ -207,6 +246,17 @@ async fn main() {
             })
         };
 
+        let traffic_overlay = Arc::new(TrafficOverlay::from_line_graph(
+            &context,
+            &original_dir.join("road_arc_manifest.arrow"),
+        ));
+        let route_evaluator = Arc::new(RouteEvaluator::from_line_graph(&context));
+        let camera_overlay = Arc::new(CameraOverlay::load(
+            &original_dir.join("road_arc_manifest.arrow"),
+            &camera_config_path,
+        ));
+        let baseline_weights = Arc::new(context.baseline_weights.clone());
+
         let ca = customization_active.clone();
         let ea = engine_alive.clone();
         let rt = tokio::runtime::Handle::current();
@@ -214,7 +264,15 @@ async fn main() {
             engine::run_line_graph(&context, &mut query_rx, &mut watch_rx, &ca, &ea, &rt);
         });
 
-        (nn, ne, bbox)
+        (
+            nn,
+            ne,
+            bbox,
+            traffic_overlay,
+            route_evaluator,
+            camera_overlay,
+            baseline_weights,
+        )
     } else {
         let perm_path = args.graph_dir.join("perms/cch_perm");
 
@@ -232,6 +290,17 @@ async fn main() {
             })
         };
 
+        let traffic_overlay = Arc::new(TrafficOverlay::from_normal(
+            &context,
+            &args.graph_dir.join("road_arc_manifest.arrow"),
+        ));
+        let route_evaluator = Arc::new(RouteEvaluator::from_normal(&context));
+        let camera_overlay = Arc::new(CameraOverlay::load(
+            &args.graph_dir.join("road_arc_manifest.arrow"),
+            &camera_config_path,
+        ));
+        let baseline_weights = Arc::new(context.baseline_weights.clone());
+
         let ca = customization_active.clone();
         let ea = engine_alive.clone();
         let rt = tokio::runtime::Handle::current();
@@ -239,12 +308,22 @@ async fn main() {
             engine::run_normal(&context, &mut query_rx, &mut watch_rx, &ca, &ea, &rt);
         });
 
-        (nn, ne, bbox)
+        (
+            nn,
+            ne,
+            bbox,
+            traffic_overlay,
+            route_evaluator,
+            camera_overlay,
+            baseline_weights,
+        )
     };
 
     let state = AppState {
         query_tx,
         watch_tx,
+        baseline_weights,
+        latest_weights: Arc::new(RwLock::new(None)),
         num_edges,
         num_nodes,
         is_line_graph: args.line_graph,
@@ -253,16 +332,31 @@ async fn main() {
         engine_alive,
         startup_time,
         queries_processed,
+        traffic_overlay,
+        route_evaluator,
+        camera_overlay,
     };
 
     // Query port — JSON API for external consumers
-    let query_router = Router::new()
+    let mut query_router = Router::new()
         .route("/query", post(handlers::handle_query))
+        .route("/evaluate_routes", post(handlers::handle_evaluate_routes))
+        .route("/reset_weights", post(handlers::handle_reset_weights))
+        .route("/traffic_overlay", get(handlers::handle_traffic_overlay))
+        .route("/camera_overlay", get(handlers::handle_camera_overlay))
         .route("/info", get(handlers::handle_info))
         .route("/health", get(handlers::handle_health))
         .route("/ready", get(handlers::handle_ready))
         .layer(TraceLayer::new_for_http())
         .with_state(state.clone());
+
+    if args.serve_ui {
+        query_router = query_router
+            .route("/", get(ui::handle_index))
+            .route("/ui", get(ui::handle_index))
+            .route("/assets/cch-query.css", get(ui::handle_styles))
+            .route("/assets/cch-query.js", get(ui::handle_script));
+    }
 
     // Customize port — binary API with gzip decompression for internal pipeline
     let customize_router = Router::new()
@@ -287,7 +381,13 @@ async fn main() {
     } else {
         "normal"
     };
-    tracing::info!(%query_addr, %customize_addr, mode, "server ready");
+    tracing::info!(
+        %query_addr,
+        %customize_addr,
+        mode,
+        ui_enabled = args.serve_ui,
+        "server ready"
+    );
 
     // Broadcast channel: one send notifies both listeners to begin graceful shutdown
     let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(1);

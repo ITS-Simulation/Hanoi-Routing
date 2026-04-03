@@ -43,9 +43,9 @@ pub struct SpatialIndex {
     bbox: BoundingBox,
 }
 
-const K_NEAREST_NODES: usize = 10;
+const K_NEAREST_NODES: usize = 30;
 const SNAP_CANDIDATE_FILTER_BUFFER: usize = 2;
-pub(crate) const SNAP_MAX_CANDIDATES: usize = 5;
+pub(crate) const SNAP_MAX_CANDIDATES: usize = 20;
 
 impl SpatialIndex {
     /// Build a spatial index from graph node coordinates and CSR adjacency.

@@ -19,6 +19,12 @@ pub struct QueryAnswer {
     pub distance_ms: Weight,
     /// Total route distance in meters (Haversine sum of coordinate path).
     pub distance_m: f64,
+    /// Ordered sequence of original graph arc IDs traversed by the route.
+    pub route_arc_ids: Vec<u32>,
+    /// Ordered sequence of graph-specific path IDs used to replay this route
+    /// under the active weight space. For normal graphs this is identical to
+    /// `route_arc_ids`; for line graphs it carries the line-graph node path.
+    pub weight_path_ids: Vec<u32>,
     /// Ordered sequence of node IDs along the shortest path.
     pub path: Vec<NodeId>,
     /// Ordered (lat, lng) pairs for each path node (pure graph coordinates).
@@ -148,6 +154,8 @@ impl<'a> QueryEngine<'a> {
                 return None;
             }
             let path = connected.node_path();
+            let route_arc_ids = self.reconstruct_arc_ids(&path)?;
+            let weight_path_ids = route_arc_ids.clone();
             let coordinates: Vec<(f32, f32)> = path
                 .iter()
                 .map(|&node| {
@@ -161,6 +169,8 @@ impl<'a> QueryEngine<'a> {
             Some(QueryAnswer {
                 distance_ms,
                 distance_m,
+                route_arc_ids,
+                weight_path_ids,
                 path,
                 coordinates,
                 turns: vec![],
@@ -229,6 +239,24 @@ impl<'a> QueryEngine<'a> {
         answer.origin = Some(from);
         answer.destination = Some(to);
         answer
+    }
+
+    fn reconstruct_arc_ids(&self, path: &[NodeId]) -> Option<Vec<u32>> {
+        if path.len() < 2 {
+            return Some(Vec::new());
+        }
+
+        let mut arc_ids = Vec::with_capacity(path.len() - 1);
+        for window in path.windows(2) {
+            let tail = window[0] as usize;
+            let head = window[1];
+            let start = self.context.graph.first_out[tail] as usize;
+            let end = self.context.graph.first_out[tail + 1] as usize;
+            let edge_idx =
+                (start..end).find(|&edge_idx| self.context.graph.head[edge_idx] == head)?;
+            arc_ids.push(edge_idx as u32);
+        }
+        Some(arc_ids)
     }
 
     /// Apply new weights and re-customize. The CCH topology is reused.

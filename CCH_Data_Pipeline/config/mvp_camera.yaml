@@ -1,0 +1,1128 @@
+profiles:
+  arterial_rush:
+    free_flow_kmh: 40.0
+    free_flow_occupancy: 0.18
+    peaks:
+    - hour: 7.75
+      speed_kmh: 18.0
+      occupancy: 0.88
+    - hour: 17.75
+      speed_kmh: 12.0
+      occupancy: 0.92
+  arterial_rush_extreme:
+    free_flow_kmh: 45.0
+    free_flow_occupancy: 0.2
+    peaks:
+    - hour: 7.75
+      speed_kmh: 10.0
+      occupancy: 0.9
+    - hour: 17.75
+      speed_kmh: 10.0
+      occupancy: 0.95
+  arterial_rush_late:
+    free_flow_kmh: 40.0
+    free_flow_occupancy: 0.18
+    peaks:
+    - hour: 7.5
+      speed_kmh: 18.0
+      occupancy: 0.88
+    - hour: 18.0
+      speed_kmh: 12.0
+      occupancy: 0.92
+  arterial_rush_early:
+    free_flow_kmh: 40.0
+    free_flow_occupancy: 0.18
+    peaks:
+    - hour: 7.25
+      speed_kmh: 18.0
+      occupancy: 0.88
+    - hour: 17.0
+      speed_kmh: 12.0
+      occupancy: 0.92
+  freeflow_local:
+    free_flow_kmh: 35.0
+    free_flow_occupancy: 0.2
+    peaks:
+    - hour: 8.0
+      speed_kmh: 22.0
+      occupancy: 0.6
+    - hour: 18.0
+      speed_kmh: 20.0
+      occupancy: 0.7
+  arterial_mid:
+    free_flow_kmh: 40.0
+    free_flow_occupancy: 0.15
+    peaks:
+    - hour: 7.75
+      speed_kmh: 25.0
+      occupancy: 0.72
+    - hour: 17.75
+      speed_kmh: 21.0
+      occupancy: 0.8
+  arterial_mid_early:
+    free_flow_kmh: 40.0
+    free_flow_occupancy: 0.15
+    peaks:
+    - hour: 7.25
+      speed_kmh: 25.0
+      occupancy: 0.72
+    - hour: 17.0
+      speed_kmh: 21.0
+      occupancy: 0.8
+cameras:
+- id: 1
+  label: Huỳnh Thúc Kháng - Nguyễn Chí Thanh
+  profile: arterial_mid
+  arc_id: 1693125
+- id: 2
+  label: Huỳnh Thúc Kháng - Nguyên Hồng
+  profile: arterial_mid
+  arc_id: 428403
+- id: 3
+  label: Nguyễn Chí Thanh - Huỳnh Thúc Kháng
+  profile: arterial_mid
+  arc_id: 327406
+- id: 4
+  label: Nguyễn Chí Thanh - Huỳnh Thúc Kháng
+  profile: arterial_mid
+  arc_id: 5886
+- id: 5
+  label: Huỳnh Thúc Kháng - Nguyễn Chí Thanh
+  profile: arterial_mid
+  arc_id: 1677382
+- id: 6
+  label: Huỳnh Thúc Kháng - Nguyên Hồng
+  profile: arterial_mid
+  arc_id: 854519
+- id: 7
+  label: Nguyên Hồng - Huỳnh Thúc Kháng
+  profile: arterial_mid
+  arc_id: 428419
+- id: 8
+  label: Nguyên Hồng - Huỳnh Thúc Kháng
+  profile: arterial_mid
+  arc_id: 341496
+- id: 9
+  label: Thái Hà - Láng Hạ
+  profile: arterial_mid
+  arc_id: 42926
+- id: 10
+  label: Huỳnh Thúc Kháng - Láng Hạ
+  profile: arterial_mid
+  arc_id: 308043
+- id: 11
+  label: Láng Hạ
+  profile: arterial_mid
+  arc_id: 296557
+- id: 12
+  label: Láng Hạ
+  profile: arterial_mid
+  arc_id: 40617
+- id: 13
+  label: Láng Hạ
+  profile: arterial_mid
+  arc_id: 428377
+- id: 14
+  label: Láng Hạ - Huỳnh Thúc Kháng
+  profile: arterial_mid
+  arc_id: 427059
+- id: 15
+  label: Láng Hạ
+  profile: arterial_mid
+  arc_id: 9620
+- id: 16
+  label: Láng Hạ
+  profile: arterial_mid
+  arc_id: 427064
+- id: 17
+  label: Láng Hạ
+  profile: arterial_mid
+  arc_id: 1870989
+- id: 18
+  label: Huỳnh Thúc Kháng
+  profile: arterial_mid
+  arc_id: 26278
+- id: 19
+  label: Thái Hà - Láng Hạ
+  profile: arterial_mid
+  arc_id: 22613
+- id: 20
+  label: Hoàng Cầu
+  profile: arterial_mid
+  arc_id: 1552114
+- id: 21
+  label: Hoàng Cầu
+  profile: arterial_mid
+  arc_id: 46805
+- id: 22
+  label: Thái Hà
+  profile: arterial_mid
+  arc_id: 424281
+- id: 23
+  label: Yên Lãng
+  profile: arterial_mid
+  arc_id: 53405
+- id: 24
+  label: Thái Hà
+  profile: arterial_mid
+  arc_id: 44679
+- id: 25
+  label: Thái Hà
+  profile: arterial_mid
+  arc_id: 424148
+- id: 26
+  label: Thái Hà
+  profile: arterial_mid
+  arc_id: 42916
+- id: 27
+  label: Tây Sơn
+  profile: arterial_mid
+  arc_id: 1869911
+- id: 28
+  label: Tây Sơn
+  profile: arterial_mid
+  arc_id: 1729385
+- id: 29
+  label: Tây Sơn
+  profile: arterial_mid
+  arc_id: 42919
+- id: 31
+  label: Chùa Bộc
+  profile: arterial_mid
+  arc_id: 26289
+- id: 32
+  label: Chùa Bộc
+  profile: arterial_mid
+  arc_id: 1884801
+- id: 33
+  label: Phạm Ngọc Thạch
+  profile: arterial_mid
+  arc_id: 436531
+- id: 34
+  label: Phạm Ngọc Thạch
+  profile: arterial_mid
+  arc_id: 135152
+- id: 35
+  label: Chùa Bộc
+  profile: arterial_mid
+  arc_id: 1630439
+- id: 36
+  label: Chùa Bộc
+  profile: arterial_mid
+  arc_id: 42910
+- id: 37
+  label: Đông Tác
+  profile: freeflow_local
+  arc_id: 1800
+- id: 38
+  label: Tôn Thất Tùng
+  profile: arterial_mid
+  arc_id: 167677
+- id: 39
+  label: Phạm Ngọc Thạch
+  profile: arterial_mid
+  arc_id: 30056
+- id: 40
+  label: Phạm Ngọc Thạch
+  profile: arterial_mid
+  arc_id: 437138
+- id: 41
+  label: Phạm Ngọc Thạch
+  profile: arterial_rush
+  arc_id: 437218
+- id: 42
+  label: Phạm Ngọc Thạch
+  profile: arterial_mid
+  arc_id: 1779
+- id: 43
+  label: Phạm Ngọc Thạch
+  profile: arterial_mid
+  arc_id: 1888689
+- id: 44
+  label: Phạm Ngọc Thạch
+  profile: arterial_rush
+  arc_id: 29942
+- id: 45
+  label: Xã Đàn
+  profile: arterial_rush
+  arc_id: 434625
+- id: 46
+  label: Xã Đàn
+  profile: arterial_rush
+  arc_id: 29947
+- id: 47
+  label: Xã Đàn
+  profile: arterial_rush
+  arc_id: 571228
+- id: 48
+  label: Xã Đàn
+  profile: arterial_rush
+  arc_id: 1834973
+- id: 49
+  label: Xã Đàn
+  profile: arterial_rush
+  arc_id: 524633
+- id: 50
+  label: Xã Đàn
+  profile: arterial_rush
+  arc_id: 1835097
+- id: 51
+  label: Ô Chợ Dừa
+  profile: arterial_rush
+  arc_id: 1886224
+- id: 52
+  label: Nguyễn Lương Bằng
+  profile: arterial_rush
+  arc_id: 22263
+- id: 53
+  label: Nguyễn Lương Bằng
+  profile: arterial_rush
+  arc_id: 1058623
+- id: 54
+  label: Tôn Đức Thắng
+  profile: arterial_rush
+  arc_id: 436725
+- id: 55
+  label: Khâm Thiên
+  profile: arterial_rush
+  arc_id: 29674
+- id: 56
+  label: Khâm Thiên
+  profile: arterial_mid
+  arc_id: 274392
+- id: 57
+  label: Đại Cồ Việt
+  profile: arterial_mid
+  arc_id: 40034
+- id: 58
+  label: Giải Phóng
+  profile: arterial_mid
+  arc_id: 1878198
+- id: 59
+  label: Giải Phóng
+  profile: arterial_mid
+  arc_id: 411183
+- id: 60
+  label: Lê Duẩn
+  profile: arterial_mid
+  arc_id: 1883968
+- id: 61
+  label: Xã Đàn
+  profile: arterial_mid
+  arc_id: 1883965
+- id: 62
+  label: Xã Đàn
+  profile: arterial_rush
+  arc_id: 29069
+- id: 63
+  label: Đại Cồ Việt
+  profile: arterial_mid
+  arc_id: 10846
+- id: 64
+  label: Đại Cồ Việt
+  profile: arterial_mid
+  arc_id: 40040
+- id: 65
+  label: Đại Cồ Việt
+  profile: arterial_mid
+  arc_id: 1886232
+- id: 66
+  label: Đại Cồ Việt
+  profile: arterial_mid
+  arc_id: 414108
+- id: 67
+  label: Trần Khát Chân
+  profile: freeflow_local
+  arc_id: 437066
+- id: 68
+  label: Đại Cồ Việt
+  profile: arterial_rush_early
+  arc_id: 4858
+- id: 69
+  label: Đại Cồ Việt
+  profile: arterial_rush_early
+  arc_id: 1940657
+- id: 70
+  label: Đại Cồ Việt
+  profile: arterial_rush_early
+  arc_id: 1883978
+- id: 71
+  label: Lê Đại Hành
+  profile: arterial_mid
+  arc_id: 2223
+- id: 72
+  label: Bạch Mai
+  profile: arterial_mid
+  arc_id: 311936
+- id: 73
+  label: Trần Khát Chân
+  profile: arterial_mid
+  arc_id: 57625
+- id: 74
+  label: Trần Khát Chân
+  profile: arterial_mid
+  arc_id: 298647
+- id: 75
+  label: Võ Thị Sáu
+  profile: arterial_rush
+  arc_id: 1720
+- id: 78
+  label: Trần Khát Chân
+  profile: arterial_rush
+  arc_id: 302028
+- id: 86
+  label: Minh Khai
+  profile: arterial_rush_late
+  arc_id: 231338
+- id: 87
+  label: Minh Khai
+  profile: arterial_rush_late
+  arc_id: 231332
+- id: 88
+  label: Minh Khai
+  profile: arterial_rush_late
+  arc_id: 528891
+- id: 89
+  label: Minh Khai
+  profile: arterial_rush_late
+  arc_id: 231261
+- id: 90
+  label: Kim Ngưu
+  profile: arterial_mid
+  arc_id: 1891832
+- id: 91
+  label: Tam Trinh
+  profile: arterial_mid
+  arc_id: 437697
+- id: 92
+  label: Tam Trinh
+  profile: arterial_mid
+  arc_id: 415930
+- id: 93
+  label: Minh Khai
+  profile: arterial_mid
+  arc_id: 223687
+- id: 94
+  label: Đại La
+  profile: arterial_mid
+  arc_id: 1891664
+- id: 95
+  label: Bạch Mai
+  profile: arterial_mid
+  arc_id: 223693
+- id: 96
+  label: Trương Định
+  profile: arterial_rush
+  arc_id: 229490
+- id: 97
+  label: Đại La
+  profile: arterial_mid
+  arc_id: 550394
+- id: 98
+  label: Trần Đại Nghĩa
+  profile: freeflow_local
+  arc_id: 1277366
+- id: 99
+  label: Trần Đại Nghĩa
+  profile: freeflow_local
+  arc_id: 59696
+- id: 100
+  label: Đại La
+  profile: arterial_mid
+  arc_id: 1910882
+- id: 101
+  label: Trường Chinh
+  profile: arterial_rush
+  arc_id: 550401
+- id: 102
+  label: Giải Phóng
+  profile: arterial_rush
+  arc_id: 414287
+- id: 103
+  label: Giải Phóng
+  profile: arterial_rush
+  arc_id: 490526
+- id: 104
+  label: Giải Phóng
+  profile: arterial_rush
+  arc_id: 414286
+- id: 105
+  label: Giải Phóng
+  profile: arterial_rush
+  arc_id: 222519
+- id: 106
+  label: Trường Chinh
+  profile: arterial_rush
+  arc_id: 42940
+- id: 107
+  label: Trường Chinh
+  profile: arterial_rush
+  arc_id: 223115
+- id: 108
+  label: Đại La
+  profile: arterial_rush
+  arc_id: 550397
+- id: 109
+  label: Trường Chinh
+  profile: arterial_rush
+  arc_id: 402396
+- id: 110
+  label: Trường Chinh
+  profile: arterial_rush
+  arc_id: 528879
+- id: 111
+  label: Trường Chinh
+  profile: arterial_rush
+  arc_id: 532655
+- id: 112
+  label: Trường Chinh
+  profile: arterial_rush
+  arc_id: 414249
+- id: 113
+  label: Trường Chinh
+  profile: arterial_rush
+  arc_id: 532656
+- id: 114
+  label: Tôn Thất Tùng
+  profile: arterial_mid
+  arc_id: 1546592
+- id: 115
+  label: Tôn Thất Tùng
+  profile: arterial_mid
+  arc_id: 220401
+- id: 116
+  label: Tôn Thất Tùng
+  profile: arterial_rush
+  arc_id: 528882
+- id: 117
+  label: Láng
+  profile: arterial_rush_extreme
+  arc_id: 416227
+- id: 118
+  label: Trường Chinh
+  profile: arterial_rush
+  arc_id: 1694184
+- id: 119
+  label: Trường Chinh
+  profile: arterial_rush
+  arc_id: 528871
+- id: 120
+  label: Trường Chinh
+  profile: arterial_rush
+  arc_id: 1617533
+- id: 121
+  label: Láng
+  profile: arterial_rush
+  arc_id: 10473
+- id: 122
+  label: Láng
+  profile: arterial_rush_late
+  arc_id: 354150
+- id: 123
+  label: Cầu vượt Ngã Tư Sở
+  profile: arterial_rush
+  arc_id: 26302
+- id: 124
+  label: Tây Sơn
+  profile: arterial_rush
+  arc_id: 1694186
+- id: 125
+  label: Nguyễn Trãi
+  profile: arterial_rush
+  arc_id: 411477
+- id: 126
+  label: Láng
+  profile: arterial_rush_extreme
+  arc_id: 46791
+- id: 127
+  label: Láng
+  profile: arterial_rush_extreme
+  arc_id: 1876995
+- id: 128
+  label: Láng
+  profile: arterial_rush
+  arc_id: 279862
+- id: 129
+  label: Láng
+  profile: arterial_rush
+  arc_id: 287816
+- id: 130
+  label: Yên Lãng
+  profile: arterial_mid
+  arc_id: 279861
+- id: 131
+  label: Yên Lãng
+  profile: arterial_mid
+  arc_id: 416223
+- id: 132
+  label: Láng
+  profile: arterial_rush_extreme
+  arc_id: 287831
+- id: 133
+  label: Láng
+  profile: arterial_rush
+  arc_id: 287883
+- id: 134
+  label: Láng Hạ
+  profile: arterial_rush
+  arc_id: 53391
+- id: 135
+  label: Lê Văn Lương
+  profile: arterial_rush_extreme
+  arc_id: 428526
+- id: 136
+  label: Láng Hạ
+  profile: arterial_rush
+  arc_id: 427434
+- id: 137
+  label: Lê Văn Lương
+  profile: arterial_rush
+  arc_id: 59111
+- id: 138
+  label: Láng
+  profile: arterial_rush_extreme
+  arc_id: 427302
+- id: 139
+  label: Láng
+  profile: arterial_rush
+  arc_id: 10448
+- id: 140
+  label: Láng
+  profile: arterial_rush_extreme
+  arc_id: 315858
+- id: 141
+  label: Láng
+  profile: arterial_rush_extreme
+  arc_id: 20029
+- id: 142
+  label: Láng
+  profile: arterial_mid
+  arc_id: 1552267
+- id: 143
+  label: Láng
+  profile: arterial_rush
+  arc_id: 408717
+- id: 144
+  label: Láng (Ven Sông)
+  profile: arterial_mid
+  arc_id: 288940
+- id: 145
+  label: Nguyễn Chí Thanh
+  profile: arterial_rush
+  arc_id: 315391
+- id: 146
+  label: Láng
+  profile: arterial_rush
+  arc_id: 437832
+- id: 147
+  label: Láng
+  profile: arterial_rush
+  arc_id: 408759
+- id: 148
+  label: Láng
+  profile: arterial_mid
+  arc_id: 408762
+- id: 149
+  label: Trần Duy Hưng
+  profile: arterial_rush_extreme
+  arc_id: 51770
+- id: 150
+  label: Trần Duy Hưng
+  profile: arterial_rush_extreme
+  arc_id: 298283
+- id: 151
+  label: Láng (Ven Sông)
+  profile: arterial_rush
+  arc_id: 287812
+- id: 152
+  label: Lê Văn Lương
+  profile: arterial_rush_extreme
+  arc_id: 288896
+- id: 153
+  label: Nguyễn Chí Thanh
+  profile: arterial_rush_extreme
+  arc_id: 1552281
+- id: 154
+  label: Hoàng Đạo Thúy
+  profile: arterial_rush_extreme
+  arc_id: 290939
+- id: 155
+  label: Hoàng Đạo Thúy
+  profile: arterial_rush
+  arc_id: 437850
+- id: 156
+  label: Trần Duy Hưng
+  profile: arterial_mid
+  arc_id: 20044
+- id: 157
+  label: Trần Duy Hưng
+  profile: arterial_mid
+  arc_id: 410125
+- id: 158
+  label: Trần Duy Hưng
+  profile: arterial_mid
+  arc_id: 308468
+- id: 159
+  label: Trần Duy Hưng
+  profile: arterial_mid
+  arc_id: 103729
+- id: 160
+  label: Hoàng Minh Giám
+  profile: arterial_rush_extreme
+  arc_id: 285015
+- id: 161
+  label: Hoàng Minh Giám
+  profile: arterial_rush_extreme
+  arc_id: 410126
+- id: 162
+  label: Nguyễn Chánh
+  profile: arterial_rush_extreme
+  arc_id: 285021
+- id: 163
+  label: Nguyễn Chánh
+  profile: arterial_rush_extreme
+  arc_id: 105006
+- id: 164
+  label: Lê Văn Lương
+  profile: arterial_rush
+  arc_id: 431993
+- id: 165
+  label: Lê Văn Lương
+  profile: arterial_rush
+  arc_id: 52087
+- id: 166
+  label: Hoàng Đạo Thúy
+  profile: arterial_rush
+  arc_id: 54956
+- id: 167
+  label: Hoàng Đạo Thúy
+  profile: arterial_rush
+  arc_id: 434956
+- id: 168
+  label: Hoàng Đạo Thúy
+  profile: arterial_rush
+  arc_id: 434964
+- id: 169
+  label: Hoàng Đạo Thúy
+  profile: arterial_mid
+  arc_id: 434961
+- id: 170
+  label: Lê Văn Lương
+  profile: arterial_rush
+  arc_id: 126586
+- id: 171
+  label: Lê Văn Lương
+  profile: arterial_rush
+  arc_id: 914846
+- id: 172
+  label: Tố Hữu
+  profile: arterial_rush
+  arc_id: 104110
+- id: 173
+  label: Tố Hữu
+  profile: arterial_rush
+  arc_id: 90712
+- id: 174
+  label: Khuất Duy Tiến
+  profile: arterial_rush
+  arc_id: 104099
+- id: 175
+  label: Khuất Duy Tiến
+  profile: arterial_rush
+  arc_id: 103656
+- id: 176
+  label: Khuất Duy Tiến
+  profile: arterial_rush
+  arc_id: 293721
+- id: 177
+  label: Khuất Duy Tiến
+  profile: arterial_rush
+  arc_id: 126584
+- id: 178
+  label: Khuất Duy Tiến
+  profile: arterial_rush
+  arc_id: 415281
+- id: 179
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 415214
+- id: 180
+  label: Khuất Duy Tiến
+  profile: arterial_rush
+  arc_id: 72360
+- id: 181
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 72362
+- id: 182
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 61800
+- id: 183
+  label: Trần Duy Hưng
+  profile: arterial_mid
+  arc_id: 415857
+- id: 184
+  label: Đại Lộ Thăng Long
+  profile: arterial_rush
+  arc_id: 292112
+- id: 185
+  label: Trần Duy Hưng
+  profile: arterial_mid
+  arc_id: 61799
+- id: 186
+  label: Nguyễn Trãi
+  profile: arterial_rush
+  arc_id: 562482
+- id: 187
+  label: Nguyễn Trãi
+  profile: arterial_rush_extreme
+  arc_id: 42888
+- id: 188
+  label: Nguyễn Xiển
+  profile: arterial_rush
+  arc_id: 1191875
+- id: 189
+  label: Khuất Duy Tiến
+  profile: arterial_rush
+  arc_id: 1543660
+- id: 190
+  label: Khuất Duy Tiến
+  profile: arterial_rush
+  arc_id: 20932
+- id: 191
+  label: Nguyễn Trãi
+  profile: arterial_rush
+  arc_id: 103487
+- id: 192
+  label: Nguyễn Trãi
+  profile: arterial_rush
+  arc_id: 103460
+- id: 193
+  label: Nguyễn Trãi
+  profile: arterial_mid
+  arc_id: 53278
+- id: 194
+  label: Nguyễn Trãi
+  profile: arterial_rush
+  arc_id: 59707
+- id: 195
+  label: Đê La Thành
+  profile: arterial_rush
+  arc_id: 261847
+- id: 196
+  label: Đê La Thành
+  profile: arterial_rush_extreme
+  arc_id: 424868
+- id: 197
+  label: Giảng Võ
+  profile: arterial_rush
+  arc_id: 5941
+- id: 198
+  label: Giảng Võ
+  profile: arterial_mid
+  arc_id: 1550996
+- id: 199
+  label: Láng Hạ
+  profile: arterial_mid
+  arc_id: 120380
+- id: 200
+  label: Láng Hạ
+  profile: arterial_rush
+  arc_id: 424703
+- id: 201
+  label: Đê La Thành
+  profile: arterial_rush_extreme
+  arc_id: 401828
+- id: 202
+  label: Ô Chợ Dừa
+  profile: arterial_mid
+  arc_id: 125910
+- id: 203
+  label: Hoàng Cầu
+  profile: arterial_mid
+  arc_id: 125913
+- id: 204
+  label: Hoàng Cầu
+  profile: arterial_mid
+  arc_id: 431916
+- id: 205
+  label: Đê La Thành
+  profile: arterial_mid
+  arc_id: 431925
+- id: 206
+  label: Đê La Thành
+  profile: arterial_mid
+  arc_id: 22215
+- id: 207
+  label: Đê La Thành
+  profile: arterial_rush_extreme
+  arc_id: 1706773
+- id: 208
+  label: Đê La Thành
+  profile: arterial_rush
+  arc_id: 438406
+- id: 209
+  label: Nguyễn Chí Thanh
+  profile: arterial_rush
+  arc_id: 436552
+- id: 210
+  label: Nguyễn Chí Thanh
+  profile: arterial_rush
+  arc_id: 38549
+- id: 211
+  label: Đê La Thành
+  profile: arterial_rush_extreme
+  arc_id: 424271
+- id: 212
+  label: Kim Ngưu
+  profile: arterial_rush
+  arc_id: 304832
+- id: 213
+  label: Lò Đúc
+  profile: arterial_rush_extreme
+  arc_id: 30118
+- id: 214
+  label: Trần Khát Chân
+  profile: arterial_mid
+  arc_id: 432280
+- id: 215
+  label: Trần Khát Chân
+  profile: arterial_mid
+  arc_id: 300056
+- id: 216
+  label: Giải Phóng - Phương Mai
+  profile: arterial_rush
+  arc_id: 1889940
+- id: 217
+  label: Tây Sơn
+  profile: arterial_rush
+  arc_id: 26291
+- id: 218
+  label: Nguyễn Trãi
+  profile: arterial_rush
+  arc_id: 402174
+- id: 219
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 415218
+- id: 220
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 1480527
+- id: 221
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 415217
+- id: 222
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 103383
+- id: 223
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 291694
+- id: 224
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 1645434
+- id: 225
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 1896692
+- id: 226
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 54014
+- id: 227
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 448434
+- id: 228
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 42846
+- id: 229
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 1583341
+- id: 230
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 42844
+- id: 231
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 54016
+- id: 232
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 1557796
+- id: 233
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 522877
+- id: 234
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 414857
+- id: 235
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 333193
+- id: 236
+  label: Nguyễn Hoàng
+  profile: arterial_rush
+  arc_id: 1723120
+- id: 237
+  label: Phạm Văn Bạch
+  profile: arterial_rush
+  arc_id: 315866
+- id: 238
+  label: Xuân Thủy
+  profile: arterial_rush
+  arc_id: 61089
+- id: 239
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 61087
+- id: 240
+  label: Phạm Hùng
+  profile: arterial_rush
+  arc_id: 319139
+- id: 241
+  label: Phạm Văn Đồng
+  profile: arterial_rush
+  arc_id: 38863
+- id: 242
+  label: Phạm Văn Đồng
+  profile: arterial_rush
+  arc_id: 1563343
+- id: 243
+  label: Hồ Tùng Mậu
+  profile: arterial_mid
+  arc_id: 26091
+- id: 244
+  label: Trần Thái Tông
+  profile: arterial_mid
+  arc_id: 1876619
+- id: 245
+  label: Trần Thái Tông
+  profile: freeflow_local
+  arc_id: 294512
+- id: 246
+  label: Nguyễn Phong Sắc
+  profile: arterial_mid
+  arc_id: 60984
+- id: 247
+  label: Cầu Giấy
+  profile: arterial_rush
+  arc_id: 1561474
+- id: 248
+  label: Xuân Thủy
+  profile: arterial_rush
+  arc_id: 294513
+- id: 249
+  label: Cầu Giấy
+  profile: arterial_rush
+  arc_id: 1689113
+- id: 250
+  label: Khúc Thừa Dụ
+  profile: freeflow_local
+  arc_id: 297879
+- id: 251
+  label: Trần Đăng Ninh
+  profile: freeflow_local
+  arc_id: 30234
+- id: 252
+  label: Cầu Giấy
+  profile: arterial_mid
+  arc_id: 296162
+- id: 253
+  label: Cầu Giấy
+  profile: arterial_rush
+  arc_id: 339376
+- id: 254
+  label: Láng
+  profile: arterial_rush
+  arc_id: 1561272
+- id: 255
+  label: Láng
+  profile: arterial_mid
+  arc_id: 1083806
+- id: 256
+  label: Cầu Giấy
+  profile: arterial_rush
+  arc_id: 35074
+- id: 257
+  label: Cầu Giấy
+  profile: arterial_mid
+  arc_id: 414859
+- id: 258
+  label: Cầu Giấy
+  profile: arterial_mid
+  arc_id: 1680208
+- id: 259
+  label: Bưởi
+  profile: arterial_rush
+  arc_id: 339383
+- id: 260
+  label: Phạm Văn Bạch
+  profile: arterial_rush
+  arc_id: 415953
+- id: 261
+  label: Hoàng Quán Chi
+  profile: freeflow_local
+  arc_id: 1899633
+- id: 262
+  label: Hoàng Quán Chi
+  profile: arterial_rush
+  arc_id: 1558150
+- id: 263
+  label: Tôn Thất Thuyết
+  profile: arterial_rush
+  arc_id: 415948
+- id: 264
+  label: Trung Kính
+  profile: arterial_rush
+  arc_id: 1554755
+- id: 265
+  label: Phạm Văn Bạch
+  profile: arterial_rush
+  arc_id: 42864
+- id: 266
+  label: Dường Đình Nghệ
+  profile: arterial_rush
+  arc_id: 42860
+- id: 267
+  label: Dường Đình Nghệ
+  profile: arterial_mid
+  arc_id: 1660093
+- id: 268
+  label: Dường Đình Nghệ
+  profile: arterial_rush
+  arc_id: 42873
+- id: 269
+  label: Dường Đình Nghệ
+  profile: arterial_mid
+  arc_id: 1896303
+- id: 270
+  label: Trung Kính
+  profile: arterial_mid
+  arc_id: 1554761
+- id: 271
+  label: Trung Kính
+  profile: arterial_mid
+  arc_id: 298721
+- id: 272
+  label: Trung Kính
+  profile: freeflow_local
+  arc_id: 1554839
+- id: 273
+  label: Mạc Thái Tông
+  profile: freeflow_local
+  arc_id: 298718
+- id: 274
+  label: Vũ Phạm Hàm
+  profile: freeflow_local
+  arc_id: 298724

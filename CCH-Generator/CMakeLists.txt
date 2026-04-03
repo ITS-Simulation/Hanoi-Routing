@@ -13,6 +13,9 @@ target_include_directories(cch_generator PRIVATE ${ROUTINGKIT_DIR}/include)
 target_link_directories(cch_generator PRIVATE ${ROUTINGKIT_DIR}/lib)
 target_link_libraries(cch_generator PRIVATE routingkit z pthread m)
 
+find_package(Arrow REQUIRED)
+target_link_libraries(cch_generator PRIVATE Arrow::arrow_shared)
+
 add_executable(validate_graph src/validate_graph.cpp)
 target_include_directories(validate_graph PRIVATE ${ROUTINGKIT_DIR}/include)
 target_link_directories(validate_graph PRIVATE ${ROUTINGKIT_DIR}/lib)

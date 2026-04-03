@@ -1,11 +1,14 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
 
 use tokio::sync::{mpsc, watch};
 
 use hanoi_core::CoordRejection;
 use rust_road_router::datastr::graph::Weight;
 
+use crate::camera_overlay::CameraOverlay;
+use crate::route_eval::RouteEvaluator;
+use crate::traffic::TrafficOverlay;
 use crate::types::{BboxInfo, QueryRequest};
 
 /// Message sent from the HTTP query handler to the background engine thread.
@@ -26,6 +29,10 @@ pub struct AppState {
     pub query_tx: mpsc::Sender<QueryMsg>,
     /// Watch channel to send weight-update vectors to the customization loop.
     pub watch_tx: watch::Sender<Option<Vec<Weight>>>,
+    /// Baseline weight vector for the currently loaded graph.
+    pub baseline_weights: Arc<Vec<Weight>>,
+    /// Latest accepted customization weights for read-only HTTP inspection.
+    pub latest_weights: Arc<RwLock<Option<Vec<Weight>>>>,
     /// Number of edges in the loaded graph (for body-size validation).
     pub num_edges: usize,
     /// Number of nodes in the loaded graph (for /info).
@@ -43,6 +50,12 @@ pub struct AppState {
     pub startup_time: std::time::Instant,
     /// Total successful queries processed (not counting validation failures).
     pub queries_processed: Arc<AtomicU64>,
+    /// Precomputed geometry + baseline data for the traffic overlay endpoint.
+    pub traffic_overlay: Arc<TrafficOverlay>,
+    /// Route replay/evaluation support for imported GeoJSON routes.
+    pub route_evaluator: Arc<RouteEvaluator>,
+    /// Precomputed camera overlay data loaded from the configured YAML file.
+    pub camera_overlay: Arc<CameraOverlay>,
 }
 
 impl AppState {

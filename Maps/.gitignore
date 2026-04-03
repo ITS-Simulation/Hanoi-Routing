@@ -1,5 +1,5 @@
 data/
-*_turns.osm
+*.osm
 *.gpkg
 vietnam-*.osm.pbf
 *.qgz
