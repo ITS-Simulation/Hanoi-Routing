@@ -1,5 +1,54 @@
 # CHANGELOGS.md
 
+## 2026-04-03 — docs: Data Pipeline documentation
+
+- Added `docs/Data Pipeline.md` — full data flow from OSM PBF through offline
+  pipeline to runtime server, including endpoint impact analysis on data state,
+  concurrency model, and directory layout reference.
+- Expanded with sections 6–11: detailed internal data flow for CCH query,
+  customization, multi-route, line-graph query, spatial snap/validation, and
+  turn annotation — tracing exact read/write on each data structure.
+- Added section 4.4: per-handler breakdown of data requirements, engine thread
+  hold time, and state mutation — with summary comparison table.
+
+## 2026-04-04 — hanoi-core: Dual-metric stretch for multi-route (geographic distance)
+
+- **`hanoi-core/src/multi_route.rs`**: Bounded Stretch now evaluates on
+  **geographic path length** (meters) instead of travel_time.  `multi_query()`
+  takes a new `path_geo_len: impl Fn(&[NodeId]) -> f64` callback.  A broad
+  travel-time prefilter (`DEFAULT_STRETCH = 5.0×`) still provides early
+  termination before the geographic check.
+  - `AlternativeRoute` gains `geo_distance_m: f64` field.
+- **`hanoi-core/src/cch.rs`**: `QueryEngine::multi_query()` passes a
+  Haversine-based `geo_len` closure.  Uses pre-computed `alt.geo_distance_m`
+  instead of re-computing `route_distance_m`.
+- **`hanoi-core/src/line_graph.rs`**: `LineGraphQueryEngine::multi_query()` and
+  `multi_query_coords()` pass `lg_path_geo_len()` closure that maps LG nodes
+  to original intersection coordinates.  New private helper
+  `lg_path_geo_len()` added.
+
+## 2026-04-04 — hanoi-core: Refactor multi-route to Basic Approach (Bounded Stretch + Limited Sharing)
+
+- **`hanoi-core/src/multi_route.rs`**: Rewrote candidate filtering to the
+  "Basic Approach": collect all common-ancestor separator nodes (Set A), then
+  check each candidate against two admissibility conditions — *Bounded Stretch*
+  (path ≤ stretch_factor × shortest) and *Limited Sharing* (edge overlap with
+  the main path ≤ 80%).  Replaces previous Jaccard diversity filtering against
+  all accepted routes.
+  - Removed `OVERLAP_THRESHOLD`, `EXPLORE_MULTIPLIER`, `jaccard_overlap()`.
+  - Added `SHARING_THRESHOLD` (0.80) and `sharing_ratio()` helper.
+  - Shortest path is always reconstructed first; alternatives are tested only
+    against it.
+
+## 2026-04-04 — hanoi-core: Fix line-graph snap direction bias
+
+- **`hanoi-core/src/line_graph.rs`**: `query_coords()` now tries ALL (src, dst)
+  snap candidate pairs and keeps the shortest route. Previously it broke out of
+  the loop after the first source edge produced any result, which in a line graph
+  caused direction-dependent detours: if the closest snap was an edge facing the
+  wrong direction, the route had to U-turn/detour around a block instead of using
+  the opposite-direction edge on the same road.
+
 ## 2026-04-04 — hanoi-tools: Add diagnose_turn diagnostic binary
 
 - **`hanoi-tools/src/bin/diagnose_turn.rs`** (NEW): CLI tool for inspecting

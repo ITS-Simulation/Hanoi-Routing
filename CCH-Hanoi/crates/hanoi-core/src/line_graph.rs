@@ -412,6 +412,11 @@ impl<'a> LineGraphQueryEngine<'a> {
 
         let mut best: Option<QueryAnswer> = None;
 
+        // In a line graph the source edge encodes travel direction, so two
+        // snap candidates on the same road but opposite directions produce
+        // very different routes.  Try ALL (src, dst) pairs and keep the
+        // shortest.  With SNAP_MAX_CANDIDATES = 5 this is at most 25 CCH
+        // queries — negligible cost.
         for src in &src_snaps {
             for dst in &dst_snaps {
                 tracing::debug!(
@@ -429,12 +434,7 @@ impl<'a> LineGraphQueryEngine<'a> {
                     if is_better {
                         best = Some(answer);
                     }
-                    break;
                 }
-            }
-
-            if best.is_some() {
-                break;
             }
         }
 
@@ -454,11 +454,15 @@ impl<'a> LineGraphQueryEngine<'a> {
         let customized = self.server.customized();
         let mut multi = MultiRouteServer::new(customized);
         let request_count = max_alternatives.saturating_mul(GEO_OVER_REQUEST).max(max_alternatives + 10);
+
+        let geo_len = self.lg_path_geo_len();
+
         let candidates = multi.multi_query(
             source_edge as NodeId,
             target_edge as NodeId,
             request_count,
             stretch_factor,
+            geo_len,
         );
 
         let source_edge_cost = self.context.original_travel_time[source_edge as usize];
@@ -518,11 +522,15 @@ impl<'a> LineGraphQueryEngine<'a> {
                 let customized = self.server.customized();
                 let mut multi = MultiRouteServer::new(customized);
                 let request_count = max_alternatives.saturating_mul(GEO_OVER_REQUEST).max(max_alternatives + 10);
+
+                let geo_len = self.lg_path_geo_len();
+
                 let candidates = multi.multi_query(
                     src.edge_id as NodeId,
                     dst.edge_id as NodeId,
                     request_count,
                     stretch_factor,
+                    geo_len,
                 );
 
                 if candidates.is_empty() {
@@ -673,5 +681,33 @@ impl<'a> LineGraphQueryEngine<'a> {
     /// Access the underlying line graph CCH context.
     pub fn context(&self) -> &'a LineGraphCchContext {
         self.context
+    }
+
+    /// Build a closure that computes the geographic length (meters) of a
+    /// line-graph path (sequence of LG node IDs = original edge indices).
+    ///
+    /// Each LG node maps to an original road segment via `original_tail` /
+    /// `original_head`. The closure converts the LG path to intersection
+    /// coordinates and sums Haversine distances.
+    fn lg_path_geo_len(&self) -> impl Fn(&[NodeId]) -> f64 + '_ {
+        let orig_tail = &self.context.original_tail;
+        let orig_head = &self.context.original_head;
+        let orig_lat = &self.context.original_latitude;
+        let orig_lng = &self.context.original_longitude;
+
+        move |lg_path: &[NodeId]| -> f64 {
+            let mut coords: Vec<(f32, f32)> = lg_path
+                .iter()
+                .map(|&lg_node| {
+                    let node = orig_tail[lg_node as usize];
+                    (orig_lat[node as usize], orig_lng[node as usize])
+                })
+                .collect();
+            if let Some(&last) = lg_path.last() {
+                let node = orig_head[last as usize];
+                coords.push((orig_lat[node as usize], orig_lng[node as usize]));
+            }
+            route_distance_m(&coords)
+        }
     }
 }
