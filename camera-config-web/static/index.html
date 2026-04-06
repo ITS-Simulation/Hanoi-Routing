@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Camera Config Web</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    >
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <header class="panel panel-header sidebar-header">
+          <h1>Camera Config Web</h1>
+          <p class="muted">Build a `cameras.yaml` file against `road_arc_manifest.arrow`.</p>
+          <div class="button-row header-actions">
+            <button id="load-yaml-btn" type="button">Load YAML</button>
+            <input id="load-yaml-input" class="hidden" type="file" accept=".yaml,.yml,text/yaml,text/x-yaml">
+          </div>
+          <dl id="dataset-meta" class="dataset-meta">
+            <div><dt>Graph</dt><dd>Loading…</dd></div>
+            <div><dt>Arcs</dt><dd>—</dd></div>
+          </dl>
+        </header>
+
+        <nav class="sidebar-tabs" aria-label="Editor sections">
+          <button type="button" class="tab-btn active" data-tab-target="search">Search</button>
+          <button type="button" class="tab-btn" data-tab-target="camera">Camera</button>
+          <button type="button" class="tab-btn" data-tab-target="saved">Saved</button>
+          <button type="button" class="tab-btn" data-tab-target="profiles">Profiles</button>
+          <button type="button" class="tab-btn" data-tab-target="export">Export</button>
+        </nav>
+
+        <div class="sidebar-content">
+          <section class="tab-panel active" data-tab-panel="search">
+            <section class="panel">
+              <div class="section-title-row">
+                <h2>Road Search</h2>
+              </div>
+              <label>
+                <span>Road name</span>
+                <input id="road-search-input" type="search" placeholder="Search by road name">
+              </label>
+              <div id="road-search-results" class="result-list scroll-list empty">Type at least 2 characters.</div>
+            </section>
+          </section>
+
+          <section class="tab-panel" data-tab-panel="camera">
+            <section class="panel">
+              <div class="section-title-row">
+                <h2>Camera Editor</h2>
+                <div class="button-row">
+                  <button id="delete-camera-btn" type="button" class="danger" disabled>Delete</button>
+                  <button id="reset-camera-btn" type="button">Reset</button>
+                  <button id="save-camera-btn" type="button" class="primary">Save Camera</button>
+                </div>
+              </div>
+
+              <div id="editor-banner" class="banner hidden"></div>
+
+              <div class="grid-two">
+                <label>
+                  <span>ID</span>
+                  <input id="camera-id-input" type="number" min="0" step="1">
+                </label>
+                <label>
+                  <span>Profile</span>
+                  <select id="camera-profile-select"></select>
+                </label>
+              </div>
+              <label>
+                <span>Label</span>
+                <input id="camera-label-input" type="text" placeholder="Camera label">
+              </label>
+
+              <fieldset class="placement-switcher">
+                <legend>Placement mode</legend>
+                <label class="inline-option">
+                  <input type="radio" name="placement-mode" value="arc" checked>
+                  <span>Explicit arc</span>
+                </label>
+                <label class="inline-option">
+                  <input type="radio" name="placement-mode" value="coordinate">
+                  <span>Coordinate + bearing</span>
+                </label>
+              </fieldset>
+
+              <div class="helper-note">
+                Click the map to inspect nearby directed arcs. The orange arrow shows the selected travel heading.
+                On two-way roads, choose the candidate whose bearing matches the traffic direction you want.
+              </div>
+
+              <div id="selected-arc-card" class="arc-card empty">
+                No road segment selected yet.
+              </div>
+
+              <div class="grid-two">
+                <label>
+                  <span>Arc ID</span>
+                  <input id="camera-arc-id-input" type="number" min="0" step="1" readonly>
+                </label>
+                <label>
+                  <span>Flow bearing</span>
+                  <input id="camera-bearing-input" type="number" min="0" max="360" step="0.1">
+                </label>
+              </div>
+
+              <div class="grid-two">
+                <label>
+                  <span>Latitude</span>
+                  <input id="camera-lat-input" type="number" step="0.000001">
+                </label>
+                <label>
+                  <span>Longitude</span>
+                  <input id="camera-lon-input" type="number" step="0.000001">
+                </label>
+              </div>
+            </section>
+          </section>
+
+          <section class="tab-panel" data-tab-panel="saved">
+            <section class="panel">
+              <div class="section-title-row">
+                <h2>Cameras</h2>
+              </div>
+              <div id="cameras-list" class="stack empty">No cameras yet.</div>
+            </section>
+          </section>
+
+          <section class="tab-panel" data-tab-panel="profiles">
+            <section class="panel">
+              <div class="section-title-row">
+                <h2>Profiles</h2>
+                <button id="add-profile-btn" type="button">Add Profile</button>
+              </div>
+              <div id="profiles-list" class="stack"></div>
+            </section>
+          </section>
+
+          <section class="tab-panel" data-tab-panel="export">
+            <section class="panel">
+              <div class="section-title-row">
+                <h2>Export YAML</h2>
+                <button id="export-yaml-btn" type="button" class="primary">Generate</button>
+              </div>
+              <div class="helper-note">
+                <code>arc</code> mode exports the exact selected directed <code>arc_id</code>. <code>coordinate</code>
+                mode exports only <code>lat</code>, <code>lon</code>, and <code>flow_bearing_deg</code>.
+              </div>
+              <div class="button-row">
+                <button id="download-yaml-btn" type="button">Download</button>
+              </div>
+              <textarea id="yaml-output" rows="16" spellcheck="false" placeholder="Generated YAML will appear here"></textarea>
+            </section>
+          </section>
+        </div>
+      </aside>
+
+      <main class="map-pane">
+        <div id="map"></div>
+        <div id="camera-workbench" class="camera-workbench hidden">
+          <details class="floating-panel" open>
+            <summary class="floating-panel-summary">
+              <span>Represented Way</span>
+              <span class="floating-panel-chevron" aria-hidden="true"></span>
+            </summary>
+            <div class="floating-panel-body">
+              <div class="helper-note">
+                This preview shows the full way-direction group the camera will represent after propagation from the
+                selected child arc.
+              </div>
+              <div id="propagation-preview-card" class="arc-card empty">
+                No propagation preview yet.
+              </div>
+              <div id="propagation-arc-list" class="result-list floating-list empty">
+                Select a directed arc to preview the represented way.
+              </div>
+            </div>
+          </details>
+
+          <details class="floating-panel" open>
+            <summary class="floating-panel-summary">
+              <span>Nearby Arc Candidates</span>
+              <span class="floating-panel-chevron" aria-hidden="true"></span>
+            </summary>
+            <div class="floating-panel-body">
+              <div id="candidate-list" class="result-list floating-list empty">Click the map to load candidates.</div>
+            </div>
+          </details>
+        </div>
+      </main>
+    </div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

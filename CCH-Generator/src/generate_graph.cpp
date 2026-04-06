@@ -1,12 +1,19 @@
 #include "../include/graph_utils.h"
 
+#include <arrow/api.h>
+#include <arrow/io/file.h>
+#include <arrow/ipc/writer.h>
+
 #include <routingkit/osm_graph_builder.h>
 #include <routingkit/osm_profile.h>
 #include <routingkit/vector_io.h>
 
+#include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -29,6 +36,11 @@ struct GeneratedGraph{
 	std::vector<unsigned>first_out;
 	std::vector<unsigned>head;
 	std::vector<unsigned>way;
+	std::vector<uint64_t>way_osm_id;
+	std::vector<std::string>way_name;
+	std::vector<std::string>way_highway;
+	std::vector<bool>is_arc_antiparallel_to_way;
+	std::vector<uint8_t>is_arc_roundabout;
 	std::vector<unsigned>travel_time;
 	std::vector<unsigned>geo_distance;
 	std::vector<float>latitude;
@@ -96,6 +108,54 @@ void save_named_vector(const std::filesystem::path&output_dir, const char*file_n
 	RoutingKit::save_vector((output_dir / file_name).string(), vec);
 }
 
+void throw_if_arrow_error(const arrow::Status&status, const std::string&context){
+	if(!status.ok())
+		throw std::runtime_error(context + ": " + status.ToString());
+}
+
+template<class T>
+T unwrap_arrow_result(arrow::Result<T>result, const std::string&context){
+	if(!result.ok())
+		throw std::runtime_error(context + ": " + result.status().ToString());
+	return std::move(result).ValueUnsafe();
+}
+
+std::vector<unsigned>build_tail(const std::vector<unsigned>&first_out, std::size_t arc_count){
+	if(first_out.empty())
+		return {};
+
+	std::vector<unsigned>tail(arc_count);
+	for(std::size_t node=0; node+1<first_out.size(); ++node){
+		for(unsigned arc_id=first_out[node]; arc_id<first_out[node+1]; ++arc_id){
+			if(arc_id >= arc_count)
+				throw std::runtime_error("Encountered out-of-range arc while building tail array");
+			tail[arc_id] = static_cast<unsigned>(node);
+		}
+	}
+	return tail;
+}
+
+float compute_bearing_degrees(float tail_lat, float tail_lon, float head_lat, float head_lon){
+	if(tail_lat == head_lat && tail_lon == head_lon)
+		return 0.0f;
+
+	constexpr double pi = 3.14159265358979323846;
+	const auto deg_to_rad = [pi](double degrees){ return degrees * pi / 180.0; };
+	const auto rad_to_deg = [pi](double radians){ return radians * 180.0 / pi; };
+
+	const double lat1 = deg_to_rad(tail_lat);
+	const double lat2 = deg_to_rad(head_lat);
+	const double delta_lon = deg_to_rad(head_lon - tail_lon);
+
+	const double y = std::sin(delta_lon) * std::cos(lat2);
+	const double x = std::cos(lat1) * std::sin(lat2)
+		- std::sin(lat1) * std::cos(lat2) * std::cos(delta_lon);
+	double bearing = rad_to_deg(std::atan2(y, x));
+	if(bearing < 0.0)
+		bearing += 360.0;
+	return static_cast<float>(bearing);
+}
+
 ProfileCallbacks get_profile_callbacks(Profile profile){
 	if(profile == Profile::car){
 		const WayFilterSignature car_is_way_used = &RoutingKit::is_osm_way_used_by_cars;
@@ -157,12 +217,24 @@ GeneratedGraph load_graph(const CliArgs&args){
 	);
 
 	std::vector<unsigned>way_speed(mapping.is_routing_way.population_count());
+	std::vector<uint64_t>way_osm_id(mapping.is_routing_way.population_count());
+	std::vector<std::string>way_name(mapping.is_routing_way.population_count());
+	std::vector<std::string>way_highway(mapping.is_routing_way.population_count());
+	std::vector<bool>way_is_roundabout(mapping.is_routing_way.population_count(), false);
 
 	auto routing_graph = load_routing_graph(
 		args.pbf_path.string(),
 		mapping,
 		[&](uint64_t osm_way_id, unsigned routing_way_id, const RoutingKit::TagMap&way_tags){
+			way_osm_id[routing_way_id] = osm_way_id;
 			way_speed[routing_way_id] = profile_callbacks.get_way_speed(osm_way_id, way_tags, log_fn);
+			way_name[routing_way_id] = RoutingKit::get_osm_way_name(osm_way_id, way_tags, log_fn);
+			const char*highway = way_tags["highway"];
+			if(highway != nullptr)
+				way_highway[routing_way_id] = highway;
+			const char*junction = way_tags["junction"];
+			if(junction != nullptr && std::string(junction) == "roundabout")
+				way_is_roundabout[routing_way_id] = true;
 			return profile_callbacks.get_direction(osm_way_id, way_tags, log_fn);
 		},
 		[&](
@@ -205,9 +277,17 @@ GeneratedGraph load_graph(const CliArgs&args){
 			out.travel_time[a] = 1;
 	}
 
+	out.is_arc_roundabout.resize(routing_graph.head.size());
+	for(std::size_t a=0; a<routing_graph.head.size(); ++a)
+		out.is_arc_roundabout[a] = way_is_roundabout[routing_graph.way[a]] ? 1 : 0;
+
 	out.first_out = std::move(routing_graph.first_out);
 	out.head = std::move(routing_graph.head);
 	out.way = std::move(routing_graph.way);
+	out.way_osm_id = std::move(way_osm_id);
+	out.way_name = std::move(way_name);
+	out.way_highway = std::move(way_highway);
+	out.is_arc_antiparallel_to_way = std::move(routing_graph.is_arc_antiparallel_to_way);
 	out.geo_distance = std::move(routing_graph.geo_distance);
 	out.latitude = std::move(routing_graph.latitude);
 	out.longitude = std::move(routing_graph.longitude);
@@ -216,10 +296,119 @@ GeneratedGraph load_graph(const CliArgs&args){
 	return out;
 }
 
+void save_road_arc_manifest(const std::filesystem::path&output_dir, const GeneratedGraph&graph){
+	const std::size_t arc_count = graph.head.size();
+	const std::size_t way_count = graph.way_osm_id.size();
+	if(graph.way.size() != arc_count || graph.is_arc_antiparallel_to_way.size() != arc_count)
+		throw std::runtime_error("Arc metadata vectors have inconsistent sizes while writing road_arc_manifest.arrow");
+	if(graph.way_name.size() != way_count || graph.way_highway.size() != way_count)
+		throw std::runtime_error("Routing-way metadata vectors have inconsistent sizes while writing road_arc_manifest.arrow");
+	if(graph.first_out.empty())
+		throw std::runtime_error("Cannot write road_arc_manifest.arrow for an empty graph");
+	const std::size_t node_count = graph.first_out.size() - 1;
+	if(graph.latitude.size() != node_count || graph.longitude.size() != node_count)
+		throw std::runtime_error("Node coordinate vectors have inconsistent sizes while writing road_arc_manifest.arrow");
+
+	const std::vector<unsigned>tail = build_tail(graph.first_out, arc_count);
+
+	arrow::UInt32Builder arc_id_builder;
+	arrow::UInt32Builder routing_way_id_builder;
+	arrow::UInt64Builder osm_way_id_builder;
+	arrow::StringBuilder name_builder;
+	arrow::StringBuilder highway_builder;
+	arrow::FloatBuilder tail_lat_builder;
+	arrow::FloatBuilder tail_lon_builder;
+	arrow::FloatBuilder head_lat_builder;
+	arrow::FloatBuilder head_lon_builder;
+	arrow::FloatBuilder bearing_builder;
+	arrow::BooleanBuilder antiparallel_builder;
+
+	for(std::size_t arc_id=0; arc_id<arc_count; ++arc_id){
+		const unsigned routing_way_id = graph.way[arc_id];
+		if(routing_way_id >= way_count)
+			throw std::runtime_error("Encountered out-of-range routing_way_id while building road_arc_manifest.arrow");
+		const unsigned tail_node = tail[arc_id];
+		const unsigned head_node = graph.head[arc_id];
+		if(tail_node >= node_count || head_node >= node_count)
+			throw std::runtime_error("Encountered out-of-range node while building road_arc_manifest.arrow");
+
+		const float tail_lat = graph.latitude[tail_node];
+		const float tail_lon = graph.longitude[tail_node];
+		const float head_lat = graph.latitude[head_node];
+		const float head_lon = graph.longitude[head_node];
+
+		throw_if_arrow_error(arc_id_builder.Append(static_cast<uint32_t>(arc_id)), "Append arc_id to road_arc_manifest.arrow");
+		throw_if_arrow_error(
+			routing_way_id_builder.Append(static_cast<uint32_t>(routing_way_id)),
+			"Append routing_way_id to road_arc_manifest.arrow"
+		);
+		throw_if_arrow_error(
+			osm_way_id_builder.Append(graph.way_osm_id[routing_way_id]),
+			"Append osm_way_id to road_arc_manifest.arrow"
+		);
+		throw_if_arrow_error(name_builder.Append(graph.way_name[routing_way_id]), "Append name to road_arc_manifest.arrow");
+		throw_if_arrow_error(highway_builder.Append(graph.way_highway[routing_way_id]), "Append highway to road_arc_manifest.arrow");
+		throw_if_arrow_error(tail_lat_builder.Append(tail_lat), "Append tail_lat to road_arc_manifest.arrow");
+		throw_if_arrow_error(tail_lon_builder.Append(tail_lon), "Append tail_lon to road_arc_manifest.arrow");
+		throw_if_arrow_error(head_lat_builder.Append(head_lat), "Append head_lat to road_arc_manifest.arrow");
+		throw_if_arrow_error(head_lon_builder.Append(head_lon), "Append head_lon to road_arc_manifest.arrow");
+		throw_if_arrow_error(
+			bearing_builder.Append(compute_bearing_degrees(tail_lat, tail_lon, head_lat, head_lon)),
+			"Append bearing_deg to road_arc_manifest.arrow"
+		);
+		throw_if_arrow_error(
+			antiparallel_builder.Append(graph.is_arc_antiparallel_to_way[arc_id]),
+			"Append is_antiparallel_to_way to road_arc_manifest.arrow"
+		);
+	}
+
+	auto schema = arrow::schema({
+		arrow::field("arc_id", arrow::uint32()),
+		arrow::field("routing_way_id", arrow::uint32()),
+		arrow::field("osm_way_id", arrow::uint64()),
+		arrow::field("name", arrow::utf8()),
+		arrow::field("highway", arrow::utf8()),
+		arrow::field("tail_lat", arrow::float32()),
+		arrow::field("tail_lon", arrow::float32()),
+		arrow::field("head_lat", arrow::float32()),
+		arrow::field("head_lon", arrow::float32()),
+		arrow::field("bearing_deg", arrow::float32()),
+		arrow::field("is_antiparallel_to_way", arrow::boolean())
+	});
+
+	std::vector<std::shared_ptr<arrow::Array>>columns;
+	columns.reserve(11);
+	columns.push_back(unwrap_arrow_result(arc_id_builder.Finish(), "Finalize arc_id array for road_arc_manifest.arrow"));
+	columns.push_back(unwrap_arrow_result(routing_way_id_builder.Finish(), "Finalize routing_way_id array for road_arc_manifest.arrow"));
+	columns.push_back(unwrap_arrow_result(osm_way_id_builder.Finish(), "Finalize osm_way_id array for road_arc_manifest.arrow"));
+	columns.push_back(unwrap_arrow_result(name_builder.Finish(), "Finalize name array for road_arc_manifest.arrow"));
+	columns.push_back(unwrap_arrow_result(highway_builder.Finish(), "Finalize highway array for road_arc_manifest.arrow"));
+	columns.push_back(unwrap_arrow_result(tail_lat_builder.Finish(), "Finalize tail_lat array for road_arc_manifest.arrow"));
+	columns.push_back(unwrap_arrow_result(tail_lon_builder.Finish(), "Finalize tail_lon array for road_arc_manifest.arrow"));
+	columns.push_back(unwrap_arrow_result(head_lat_builder.Finish(), "Finalize head_lat array for road_arc_manifest.arrow"));
+	columns.push_back(unwrap_arrow_result(head_lon_builder.Finish(), "Finalize head_lon array for road_arc_manifest.arrow"));
+	columns.push_back(unwrap_arrow_result(bearing_builder.Finish(), "Finalize bearing_deg array for road_arc_manifest.arrow"));
+	columns.push_back(unwrap_arrow_result(antiparallel_builder.Finish(), "Finalize is_antiparallel_to_way array for road_arc_manifest.arrow"));
+
+	auto batch = arrow::RecordBatch::Make(schema, static_cast<int64_t>(arc_count), std::move(columns));
+	auto output = unwrap_arrow_result(
+		arrow::io::FileOutputStream::Open((output_dir / "road_arc_manifest.arrow").string()),
+		"Open road_arc_manifest.arrow for writing"
+	);
+	auto writer = unwrap_arrow_result(
+		arrow::ipc::MakeFileWriter(output.get(), schema),
+		"Create Arrow IPC writer for road_arc_manifest.arrow"
+	);
+	throw_if_arrow_error(writer->WriteRecordBatch(*batch), "Write road_arc_manifest.arrow record batch");
+	throw_if_arrow_error(writer->Close(), "Close road_arc_manifest.arrow writer");
+	throw_if_arrow_error(output->Close(), "Close road_arc_manifest.arrow output file");
+}
+
 void save_graph(const std::filesystem::path&output_dir, const GeneratedGraph&graph){
 	save_named_vector(output_dir, "first_out", graph.first_out);
 	save_named_vector(output_dir, "head", graph.head);
 	save_named_vector(output_dir, "way", graph.way);
+	save_named_vector(output_dir, "is_arc_roundabout", graph.is_arc_roundabout);
 	save_named_vector(output_dir, "travel_time", graph.travel_time);
 	save_named_vector(output_dir, "geo_distance", graph.geo_distance);
 	save_named_vector(output_dir, "latitude", graph.latitude);
@@ -239,6 +428,11 @@ int main(int argc, char*argv[]){
 		cch_generator::ensure_directory(args.output_dir);
 		const GeneratedGraph graph = load_graph(args);
 		save_graph(args.output_dir, graph);
+		save_road_arc_manifest(args.output_dir, graph);
+		std::error_code remove_error;
+		std::filesystem::remove(args.output_dir / "road_manifest.arrow", remove_error);
+		if(remove_error)
+			throw std::runtime_error("Failed to remove stale road_manifest.arrow: " + remove_error.message());
 
 		const std::size_t node_count = graph.first_out.empty() ? 0 : graph.first_out.size() - 1;
 		cch_generator::print_graph_stats(

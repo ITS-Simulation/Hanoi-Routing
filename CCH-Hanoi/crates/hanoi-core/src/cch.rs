@@ -20,6 +20,12 @@ pub struct QueryAnswer {
     pub distance_ms: Weight,
     /// Total route distance in meters (Haversine sum of coordinate path).
     pub distance_m: f64,
+    /// Ordered sequence of original graph arc IDs traversed by the route.
+    pub route_arc_ids: Vec<u32>,
+    /// Ordered sequence of graph-specific path IDs used to replay this route
+    /// under the active weight space. For normal graphs this is identical to
+    /// `route_arc_ids`; for line graphs it carries the line-graph node path.
+    pub weight_path_ids: Vec<u32>,
     /// Ordered sequence of node IDs along the shortest path.
     pub path: Vec<NodeId>,
     /// Ordered (lat, lng) pairs for each path node (pure graph coordinates).
@@ -149,6 +155,8 @@ impl<'a> QueryEngine<'a> {
                 return None;
             }
             let path = connected.node_path();
+            let route_arc_ids = self.reconstruct_arc_ids(&path)?;
+            let weight_path_ids = route_arc_ids.clone();
             let coordinates: Vec<(f32, f32)> = path
                 .iter()
                 .map(|&node| {
@@ -162,6 +170,8 @@ impl<'a> QueryEngine<'a> {
             Some(QueryAnswer {
                 distance_ms,
                 distance_m,
+                route_arc_ids,
+                weight_path_ids,
                 path,
                 coordinates,
                 turns: vec![],
@@ -232,105 +242,22 @@ impl<'a> QueryEngine<'a> {
         answer
     }
 
-    /// Find up to `max_alternatives` alternative routes by node IDs.
-    pub fn multi_query(
-        &self,
-        from: NodeId,
-        to: NodeId,
-        max_alternatives: usize,
-        stretch_factor: f64,
-    ) -> Vec<QueryAnswer> {
-        let customized = self.server.customized();
-        let mut multi = MultiRouteServer::new(customized);
-        let request_count = max_alternatives.saturating_mul(GEO_OVER_REQUEST).max(max_alternatives + 10);
-        let candidates = multi.multi_query(from, to, request_count, stretch_factor);
-
-        let mut results: Vec<QueryAnswer> = Vec::with_capacity(max_alternatives);
-        let mut shortest_geo_dist: Option<f64> = None;
-
-        for alt in candidates {
-            if results.len() >= max_alternatives {
-                break;
-            }
-            if alt.path.is_empty() {
-                continue;
-            }
-            let coordinates: Vec<(f32, f32)> = alt
-                .path
-                .iter()
-                .map(|&node| {
-                    (
-                        self.context.graph.latitude[node as usize],
-                        self.context.graph.longitude[node as usize],
-                    )
-                })
-                .collect();
-            let distance_m = route_distance_m(&coordinates);
-
-            if let Some(base) = shortest_geo_dist {
-                if distance_m > base * MAX_GEO_RATIO {
-                    continue;
-                }
-            } else {
-                shortest_geo_dist = Some(distance_m);
-            }
-
-            results.push(QueryAnswer {
-                distance_ms: alt.distance,
-                distance_m,
-                path: alt.path,
-                coordinates,
-                turns: vec![],
-                origin: None,
-                destination: None,
-            });
+    fn reconstruct_arc_ids(&self, path: &[NodeId]) -> Option<Vec<u32>> {
+        if path.len() < 2 {
+            return Some(Vec::new());
         }
 
-        results
-    }
-
-    /// Find up to `max_alternatives` alternative routes by coordinates.
-    pub fn multi_query_coords(
-        &self,
-        from: (f32, f32),
-        to: (f32, f32),
-        max_alternatives: usize,
-        stretch_factor: f64,
-    ) -> Result<Vec<QueryAnswer>, CoordRejection> {
-        let src_snaps = self.spatial.validated_snap_candidates(
-            "origin",
-            from.0,
-            from.1,
-            &self.validation_config,
-            SNAP_MAX_CANDIDATES,
-        )?;
-        let dst_snaps = self.spatial.validated_snap_candidates(
-            "destination",
-            to.0,
-            to.1,
-            &self.validation_config,
-            SNAP_MAX_CANDIDATES,
-        )?;
-
-        for src in &src_snaps {
-            for dst in &dst_snaps {
-                let answers = self.multi_query(
-                    src.nearest_node(),
-                    dst.nearest_node(),
-                    max_alternatives,
-                    stretch_factor,
-                );
-                if !answers.is_empty() {
-                    let patched: Vec<QueryAnswer> = answers
-                        .into_iter()
-                        .map(|a| Self::patch_coordinates(a, from, to))
-                        .collect();
-                    return Ok(patched);
-                }
-            }
+        let mut arc_ids = Vec::with_capacity(path.len() - 1);
+        for window in path.windows(2) {
+            let tail = window[0] as usize;
+            let head = window[1];
+            let start = self.context.graph.first_out[tail] as usize;
+            let end = self.context.graph.first_out[tail + 1] as usize;
+            let edge_idx =
+                (start..end).find(|&edge_idx| self.context.graph.head[edge_idx] == head)?;
+            arc_ids.push(edge_idx as u32);
         }
-
-        Ok(Vec::new())
+        Some(arc_ids)
     }
 
     /// Apply new weights and re-customize. The CCH topology is reused.

@@ -161,7 +161,7 @@ fn dispatch_normal(
         None => tracing::info!("query returned no path"),
     }
 
-    Ok(format_response(answer, format, colors))
+    Ok(format_response(answer, format, colors, "normal"))
 }
 
 fn dispatch_line_graph(
@@ -208,25 +208,32 @@ fn dispatch_line_graph(
         None => tracing::info!("query returned no path"),
     }
 
-    Ok(format_response(answer, format, colors))
+    Ok(format_response(answer, format, colors, "line_graph"))
 }
 
 /// Convert a query answer to the requested response format.
 /// Default (None) → GeoJSON Feature; `"json"` → plain JSON.
 /// When `colors` is true and format is GeoJSON, adds simplestyle-spec properties.
-fn format_response(answer: Option<QueryAnswer>, format: Option<&str>, colors: bool) -> Value {
+fn format_response(
+    answer: Option<QueryAnswer>,
+    format: Option<&str>,
+    colors: bool,
+    graph_type: &'static str,
+) -> Value {
     match format {
-        Some("json") => serde_json::to_value(answer_to_response(answer)).unwrap(),
-        _ => answer_to_geojson(answer, colors),
+        Some("json") => serde_json::to_value(answer_to_response(answer, graph_type)).unwrap(),
+        _ => answer_to_geojson(answer, colors, graph_type),
     }
 }
 
-fn answer_to_response(answer: Option<QueryAnswer>) -> QueryResponse {
+fn answer_to_response(answer: Option<QueryAnswer>, graph_type: &'static str) -> QueryResponse {
     match answer {
         Some(a) => {
             let QueryAnswer {
                 distance_ms,
                 distance_m,
+                route_arc_ids,
+                weight_path_ids,
                 path,
                 coordinates,
                 turns,
@@ -235,9 +242,12 @@ fn answer_to_response(answer: Option<QueryAnswer>) -> QueryResponse {
             } = a;
 
             QueryResponse {
+                graph_type: Some(graph_type),
                 distance_ms: Some(distance_ms),
                 distance_m: Some(distance_m),
                 path_nodes: path,
+                route_arc_ids,
+                weight_path_ids,
                 coordinates: coordinates
                     .into_iter()
                     .map(|(lat, lng)| [lat, lng])
@@ -259,13 +269,15 @@ fn answer_to_response(answer: Option<QueryAnswer>) -> QueryResponse {
 ///
 /// When `colors` is true, adds simplestyle-spec visualization properties
 /// (stroke, stroke-width, fill, fill-opacity) to the Feature properties.
-fn answer_to_geojson(answer: Option<QueryAnswer>, colors: bool) -> Value {
+fn answer_to_geojson(answer: Option<QueryAnswer>, colors: bool, graph_type: &'static str) -> Value {
     match answer {
         Some(a) => {
             let QueryAnswer {
                 distance_ms,
                 distance_m,
-                path: _,
+                route_arc_ids,
+                weight_path_ids,
+                path,
                 coordinates,
                 turns,
                 origin,
@@ -276,8 +288,14 @@ fn answer_to_geojson(answer: Option<QueryAnswer>, colors: bool) -> Value {
             let coords: Vec<[f32; 2]> = coordinates.iter().map(|&(lat, lng)| [lng, lat]).collect();
 
             let mut props = serde_json::json!({
+                "source": "hanoi_server",
+                "export_version": 1,
+                "graph_type": graph_type,
                 "distance_ms": distance_ms,
-                "distance_m": distance_m
+                "distance_m": distance_m,
+                "path_nodes": path,
+                "route_arc_ids": route_arc_ids,
+                "weight_path_ids": weight_path_ids,
             });
             let obj = props.as_object_mut().unwrap();
             if let Some((lat, lng)) = origin {

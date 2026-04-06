@@ -1,4 +1,4 @@
-@queryURL = localhost:8081/query?colors
+@queryURL = localhost:8080/query?colors
 @filePath = res/hanoi_motorcycle_res
 @fileFormat = geojson
 

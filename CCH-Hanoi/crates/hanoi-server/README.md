@@ -9,6 +9,26 @@
 | `8080` | `/query`, `/info`, `/health`, `/ready` | Query and status API |
 | `9080` | `/customize` | Weight upload / re-customization API |
 
+## Optional bundled UI
+
+`hanoi_server` can also serve a bundled OSM route-viewer UI from the query
+port, but it is opt-in so the server can still run API-only.
+
+Enable it with:
+
+```bash
+hanoi_server --graph-dir Maps/data/hanoi_car/graph --serve-ui
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8080/
+```
+
+Without `--serve-ui`, the root path stays disabled and only the JSON API is
+served.
+
 ## `/customize` behavior
 
 `POST /customize` returns `200 OK` before customization completes. The handler

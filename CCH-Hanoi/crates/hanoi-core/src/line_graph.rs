@@ -12,7 +12,7 @@ use rust_road_router::io::Load;
 
 use crate::bounds::{BoundingBox, CoordRejection, ValidationConfig};
 use crate::cch::{QueryAnswer, route_distance_m};
-use crate::geometry::compute_turns;
+use crate::geometry::{compute_turns, refine_turns};
 use crate::graph::GraphData;
 use crate::multi_route::{GEO_OVER_REQUEST, MAX_GEO_RATIO, MultiRouteServer};
 use crate::spatial::{SNAP_MAX_CANDIDATES, SpatialIndex};
@@ -47,6 +47,14 @@ pub struct LineGraphCchContext {
 
     /// Original graph's travel_time (for source-edge correction at query time).
     pub original_travel_time: Vec<Weight>,
+
+    /// Maps each line-graph node back to the original directed arc it
+    /// represents. Split nodes clone an original arc and therefore point back
+    /// to that arc ID.
+    pub original_arc_id_of_lg_node: Vec<u32>,
+
+    /// Per-LG-node flag: true if the original arc belongs to a roundabout way.
+    pub is_arc_roundabout: Vec<u8>,
 }
 
 impl LineGraphCchContext {
@@ -75,6 +83,9 @@ impl LineGraphCchContext {
         let original_longitude: Vec<f32> = Vec::load_from(original_graph_dir.join("longitude"))?;
         let mut original_travel_time: Vec<Weight> =
             Vec::load_from(original_graph_dir.join("travel_time"))?;
+        let mut original_arc_id_of_lg_node: Vec<u32> = (0..original_head.len())
+            .map(|arc_id| arc_id as u32)
+            .collect();
 
         // Reconstruct tail array from original first_out (CSR → per-edge tail node).
         // tail[edge_i] = the node whose adjacency list contains edge i.
@@ -111,6 +122,7 @@ impl LineGraphCchContext {
             original_tail.push(tail_val);
             original_head.push(head_val);
             original_travel_time.push(tt_val);
+            original_arc_id_of_lg_node.push(original);
         }
 
         // Consistency check: the reconstruction arrays must cover all LG nodes
@@ -129,6 +141,16 @@ impl LineGraphCchContext {
                 ),
             ));
         }
+        if original_arc_id_of_lg_node.len() != num_lg_nodes {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "original arc reconstruction length ({}) does not match line graph node count ({})",
+                    original_arc_id_of_lg_node.len(),
+                    num_lg_nodes
+                ),
+            ));
+        }
 
         tracing::info!(
             num_original_edges,
@@ -138,6 +160,20 @@ impl LineGraphCchContext {
 
         let num_nodes = graph.num_nodes();
         let num_edges = graph.num_edges();
+        let is_arc_roundabout: Vec<u8> = Vec::load_from(line_graph_dir.join("is_arc_roundabout"))
+            .unwrap_or_else(|_| vec![0u8; num_lg_nodes]);
+
+        if is_arc_roundabout.len() != num_lg_nodes {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "is_arc_roundabout length ({}) does not match line graph node count ({})",
+                    is_arc_roundabout.len(),
+                    num_lg_nodes
+                ),
+            ));
+        }
+
         tracing::info!(num_nodes, num_edges, "building DirectedCCH for line graph");
 
         // Build undirected CCH first, then convert to directed (prune always-INFINITY edges)
@@ -157,6 +193,8 @@ impl LineGraphCchContext {
             original_latitude,
             original_longitude,
             original_travel_time,
+            original_arc_id_of_lg_node,
+            is_arc_roundabout,
         })
     }
 
@@ -260,16 +298,11 @@ impl<'a> LineGraphQueryEngine<'a> {
             } else {
                 &[]
             };
-
-            // Build turns from trimmed path
-            let turns = compute_turns(
-                trimmed,
-                &self.context.original_tail,
-                &self.context.original_head,
-                &self.context.original_first_out,
-                &self.context.original_latitude,
-                &self.context.original_longitude,
-            );
+            let route_arc_ids: Vec<u32> = trimmed
+                .iter()
+                .map(|&lg_node| self.context.original_arc_id_of_lg_node[lg_node as usize])
+                .collect();
+            let weight_path_ids: Vec<u32> = lg_path.iter().map(|&lg_node| lg_node as u32).collect();
 
             // Map trimmed LG path to original intersection node IDs
             let mut path: Vec<NodeId> = trimmed
@@ -296,11 +329,24 @@ impl<'a> LineGraphQueryEngine<'a> {
                 })
                 .collect();
 
+            let mut turns = compute_turns(
+                trimmed,
+                &self.context.original_tail,
+                &self.context.original_head,
+                &self.context.original_first_out,
+                &self.context.original_latitude,
+                &self.context.original_longitude,
+                &self.context.is_arc_roundabout,
+            );
+            refine_turns(&mut turns, &coordinates);
+
             let distance_m = route_distance_m(&coordinates);
 
             Some(QueryAnswer {
                 distance_ms,
                 distance_m,
+                route_arc_ids,
+                weight_path_ids,
                 path,
                 coordinates,
                 turns,
@@ -334,15 +380,11 @@ impl<'a> LineGraphQueryEngine<'a> {
             let distance_ms = cch_distance.saturating_add(source_edge_cost);
 
             let lg_path = connected.node_path();
-            let turns = compute_turns(
-                &lg_path,
-                &self.context.original_tail,
-                &self.context.original_head,
-                &self.context.original_first_out,
-                &self.context.original_latitude,
-                &self.context.original_longitude,
-            );
-
+            let route_arc_ids: Vec<u32> = lg_path
+                .iter()
+                .map(|&lg_node| self.context.original_arc_id_of_lg_node[lg_node as usize])
+                .collect();
+            let weight_path_ids: Vec<u32> = lg_path.iter().map(|&lg_node| lg_node as u32).collect();
             // Map line-graph path to original intersection node IDs.
             // Each line-graph node is an original edge index; we map it to the
             // tail node of that original edge, then append the head of the final edge.
@@ -368,10 +410,23 @@ impl<'a> LineGraphQueryEngine<'a> {
                 })
                 .collect();
 
+            let mut turns = compute_turns(
+                &lg_path,
+                &self.context.original_tail,
+                &self.context.original_head,
+                &self.context.original_first_out,
+                &self.context.original_latitude,
+                &self.context.original_longitude,
+                &self.context.is_arc_roundabout,
+            );
+            refine_turns(&mut turns, &coordinates);
+
             let distance_m = route_distance_m(&coordinates);
             Some(QueryAnswer {
                 distance_ms,
                 distance_m,
+                route_arc_ids,
+                weight_path_ids,
                 path,
                 coordinates,
                 turns,

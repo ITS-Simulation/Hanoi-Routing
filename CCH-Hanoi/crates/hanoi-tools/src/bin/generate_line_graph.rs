@@ -170,6 +170,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let graph = WeightedGraphReconstructor("travel_time").reconstruct_from(&graph_path)?;
     let lat = Vec::<f32>::load_from(graph_path.join("latitude"))?;
     let lng = Vec::<f32>::load_from(graph_path.join("longitude"))?;
+    let is_arc_roundabout: Vec<u8> = Vec::load_from(graph_path.join("is_arc_roundabout"))?;
 
     if lat.len() != graph.num_nodes() || lng.len() != graph.num_nodes() {
         return Err(IoError::new(
@@ -183,6 +184,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         )
         .into());
     }
+    assert_eq!(is_arc_roundabout.len(), graph.num_arcs());
 
     let forbidden_from = Vec::<EdgeId>::load_from(graph_path.join("forbidden_turn_from_arc"))?;
     let forbidden_to = Vec::<EdgeId>::load_from(graph_path.join("forbidden_turn_to_arc"))?;
@@ -226,7 +228,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             return None;
         }
         if tail[edge1_idx as usize] == graph.head()[edge2_idx as usize] {
-            return Some(0); // U-turn penalty: 0 seconds (in milliseconds)
+            return Some(20_000); // U-turn penalty: 20 seconds (in milliseconds)
         }
         Some(0)
     });
@@ -278,6 +280,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let expanded_n = split_result.graph.num_nodes();
     let mut new_lat: Vec<f32> = Vec::with_capacity(expanded_n);
     let mut new_lng: Vec<f32> = Vec::with_capacity(expanded_n);
+    let mut lg_is_roundabout: Vec<u8> = is_arc_roundabout.clone();
 
     for idx in 0..base_lg_nodes {
         new_lat.push(lat[tail[idx] as usize]);
@@ -287,6 +290,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         // Split node inherits coordinates from its original LG node
         new_lat.push(lat[tail[original as usize] as usize]);
         new_lng.push(lng[tail[original as usize] as usize]);
+        lg_is_roundabout.push(is_arc_roundabout[original as usize]);
     }
 
     // Write expanded line graph
@@ -304,6 +308,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .write_to(&output_dir.join("travel_time"))?;
     new_lat.write_to(&output_dir.join("latitude"))?;
     new_lng.write_to(&output_dir.join("longitude"))?;
+    lg_is_roundabout.write_to(&output_dir.join("is_arc_roundabout"))?;
 
     // Write split map (mandatory for path reconstruction at runtime)
     split_result

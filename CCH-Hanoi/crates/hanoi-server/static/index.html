@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CCH Route Viewer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap"
+      rel="stylesheet"
+    >
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    >
+    <link rel="stylesheet" href="/assets/cch-query.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <div class="ambient ambient-one"></div>
+      <div class="ambient ambient-two"></div>
+
+      <aside class="sidebar glass-card">
+        <header class="hero-card">
+          <div class="eyebrow">CCH Route Viewer</div>
+          <h1>Query the Hanoi CCH server directly from an interactive OSM map.</h1>
+          <p class="hero-copy">
+            Click to place source and destination points, or type coordinates manually. The returned GeoJSON is drawn on the map with route stats and maneuver summaries alongside it.
+          </p>
+
+          <div class="chip-row">
+            <span id="server-status-chip" class="status-chip pending">Loading server status</span>
+            <span id="graph-type-chip" class="soft-chip">Graph: —</span>
+          </div>
+        </header>
+
+        <section class="glass-card section-card">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">Live Dataset</p>
+                <h2>Server Context</h2>
+              </div>
+              <div class="section-actions">
+                <button id="refresh-server-btn" type="button" class="secondary-btn">Refresh</button>
+                <button id="reset-weights-btn" type="button" class="secondary-btn">Reset Weights</button>
+              </div>
+            </div>
+
+          <dl class="server-grid">
+            <div>
+              <dt>Nodes</dt>
+              <dd id="meta-nodes">—</dd>
+            </div>
+            <div>
+              <dt>Edges</dt>
+              <dd id="meta-edges">—</dd>
+            </div>
+            <div>
+              <dt>Queries</dt>
+              <dd id="meta-queries">—</dd>
+            </div>
+            <div>
+              <dt>Uptime</dt>
+              <dd id="meta-uptime">—</dd>
+            </div>
+          </dl>
+          <p id="coverage-caption" class="section-note">Coverage bounds not loaded yet.</p>
+        </section>
+
+        <section class="glass-card section-card">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">Workspace</p>
+              <h2>Mode</h2>
+            </div>
+          </div>
+          <div class="segmented-control workspace-tabs" role="tablist" aria-label="Viewer workspace">
+            <button id="workspace-query-btn" type="button" class="segment-btn active" data-mode-tab="query">Query</button>
+            <button id="workspace-compare-btn" type="button" class="segment-btn" data-mode-tab="compare">Compare</button>
+          </div>
+          <p id="workspace-caption" class="section-note">
+            Query a route live or compare exported GeoJSON routes under the current server weight profile.
+          </p>
+        </section>
+
+        <div id="query-panel" class="mode-panel active">
+          <form id="query-form" class="query-stack" novalidate>
+            <section class="glass-card section-card">
+              <div class="section-head">
+                <div>
+                  <p class="section-kicker">Route Builder</p>
+                  <h2>Select Endpoints</h2>
+                </div>
+                <div class="segmented-control" role="tablist" aria-label="Map click target">
+                  <button id="pick-from-btn" type="button" class="segment-btn active" data-target="from">Pick Source</button>
+                  <button id="pick-to-btn" type="button" class="segment-btn" data-target="to">Pick Destination</button>
+                </div>
+              </div>
+
+              <p id="picker-hint" class="section-note">
+                Map clicks are currently targeting the source point.
+              </p>
+
+              <div id="from-card" class="point-card active" data-point-card="from">
+                <div class="point-card-head">
+                  <div>
+                    <p class="point-label">Source</p>
+                    <p class="point-caption">Start of the route</p>
+                  </div>
+                  <div class="point-actions">
+                    <button type="button" class="ghost-btn" data-target="from">Pick on map</button>
+                    <button type="button" class="ghost-btn" data-clear-point="from">Clear</button>
+                  </div>
+                </div>
+
+                <div class="coord-grid">
+                  <label>
+                    <span>Latitude</span>
+                    <input id="from-lat-input" name="from-lat" type="number" step="0.000001" placeholder="21.028511">
+                  </label>
+                  <label>
+                    <span>Longitude</span>
+                    <input id="from-lng-input" name="from-lng" type="number" step="0.000001" placeholder="105.804817">
+                  </label>
+                </div>
+              </div>
+
+              <div id="to-card" class="point-card" data-point-card="to">
+                <div class="point-card-head">
+                  <div>
+                    <p class="point-label">Destination</p>
+                    <p class="point-caption">End of the route</p>
+                  </div>
+                  <div class="point-actions">
+                    <button type="button" class="ghost-btn" data-target="to">Pick on map</button>
+                    <button type="button" class="ghost-btn" data-clear-point="to">Clear</button>
+                  </div>
+                </div>
+
+                <div class="coord-grid">
+                  <label>
+                    <span>Latitude</span>
+                    <input id="to-lat-input" name="to-lat" type="number" step="0.000001" placeholder="21.033333">
+                  </label>
+                  <label>
+                    <span>Longitude</span>
+                    <input id="to-lng-input" name="to-lng" type="number" step="0.000001" placeholder="105.850000">
+                  </label>
+                </div>
+              </div>
+
+              <div class="action-row">
+                <button id="swap-points-btn" type="button" class="secondary-btn">Swap</button>
+                <button id="reset-points-btn" type="button" class="secondary-btn">Reset</button>
+                <button id="run-query-btn" type="submit" class="primary-btn">Find Route</button>
+              </div>
+
+              <div id="message-banner" class="banner info">
+                Select two coordinates or click directly on the map to start a route query.
+              </div>
+            </section>
+          </form>
+
+          <section class="glass-card section-card">
+            <div class="section-head">
+              <div>
+                <p class="section-kicker">GeoJSON Result</p>
+                <h2>Route Summary</h2>
+              </div>
+              <div class="section-actions">
+                <span id="route-badge" class="soft-chip">Awaiting query</span>
+                <button id="export-route-btn" type="button" class="secondary-btn">Export GeoJSON</button>
+              </div>
+            </div>
+
+            <div class="stats-grid">
+              <article class="stat-card">
+                <span class="stat-label">Travel Time</span>
+                <strong id="stat-time">—</strong>
+              </article>
+              <article class="stat-card">
+                <span class="stat-label">Distance</span>
+                <strong id="stat-distance">—</strong>
+              </article>
+              <article class="stat-card">
+                <span class="stat-label">Maneuvers</span>
+                <strong id="stat-turns">—</strong>
+              </article>
+              <article class="stat-card">
+                <span class="stat-label">Client Latency</span>
+                <strong id="stat-latency">—</strong>
+              </article>
+            </div>
+
+            <div class="detail-grid">
+              <div>
+                <span class="detail-label">Source</span>
+                <span id="summary-from" class="detail-value">—</span>
+              </div>
+              <div>
+                <span class="detail-label">Destination</span>
+                <span id="summary-to" class="detail-value">—</span>
+              </div>
+              <div>
+                <span class="detail-label">Geometry points</span>
+                <span id="summary-points" class="detail-value">—</span>
+              </div>
+              <div>
+                <span class="detail-label">Query mode</span>
+                <span id="summary-mode" class="detail-value">GeoJSON / coordinates</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="glass-card section-card maneuvers-card">
+            <div class="section-head">
+              <div>
+                <p class="section-kicker">Turn Detail</p>
+                <h2>Maneuvers</h2>
+              </div>
+            </div>
+
+            <div id="turn-list" class="turn-list empty">
+              No route queried yet.
+            </div>
+          </section>
+        </div>
+
+        <div id="compare-panel" class="mode-panel">
+          <section class="glass-card section-card">
+            <div class="section-head">
+              <div>
+                <p class="section-kicker">Imported Routes</p>
+                <h2>Compare GeoJSON</h2>
+              </div>
+              <div class="section-actions">
+                <button id="load-route-files-btn" type="button" class="secondary-btn">Load GeoJSON</button>
+                <input
+                  id="load-route-files-input"
+                  class="hidden-input"
+                  type="file"
+                  accept=".geojson,.json,application/geo+json,application/json"
+                  multiple
+                >
+                <button id="recalculate-routes-btn" type="button" class="secondary-btn">Recalculate</button>
+                <button id="clear-routes-btn" type="button" class="secondary-btn">Clear</button>
+              </div>
+            </div>
+
+            <p class="section-note">
+              Load up to 10 routes exported from this viewer to evaluate them under the server's currently active baseline or customized weights.
+            </p>
+
+            <div class="segmented-control workspace-tabs" role="tablist" aria-label="Comparison mode">
+              <button id="compare-view-all-btn" type="button" class="segment-btn active">All Routes</button>
+              <button id="compare-view-focus-btn" type="button" class="segment-btn">Focus 1-1</button>
+            </div>
+
+            <div id="compare-focus-controls" class="compare-focus-controls">
+              <label>
+                <span>Route A</span>
+                <select id="compare-focus-a-select"></select>
+              </label>
+              <label>
+                <span>Route B</span>
+                <select id="compare-focus-b-select"></select>
+              </label>
+            </div>
+
+            <div id="compare-focus-summary" class="compare-focus-summary empty">
+              Select two imported routes to focus the comparison.
+            </div>
+
+            <div id="compare-banner" class="banner info">
+              No GeoJSON routes loaded yet.
+            </div>
+          </section>
+
+          <section class="glass-card section-card">
+            <div class="section-head">
+              <div>
+                <p class="section-kicker">Comparison Results</p>
+                <h2>Route List</h2>
+              </div>
+              <span id="compare-route-count" class="soft-chip">0 routes</span>
+            </div>
+
+            <div id="compare-route-list" class="compare-route-list empty">
+              No imported GeoJSON routes yet.
+            </div>
+          </section>
+        </div>
+      </aside>
+
+      <main class="map-stage">
+        <div id="map"></div>
+
+        <div class="map-overlay top-left glass-card compact-card">
+          <p class="overlay-kicker">Map Interaction</p>
+          <h2 id="map-overlay-title">Click to set the source</h2>
+          <p id="map-overlay-copy" class="overlay-copy">
+            Source clicks automatically advance the picker to destination so you can choose both points quickly.
+          </p>
+        </div>
+
+        <div id="legend-card" class="map-overlay top-right glass-card compact-card legend-card">
+          <div class="legend-card-header">
+            <p class="overlay-kicker">Legend</p>
+            <button
+              id="legend-collapse-btn"
+              type="button"
+              class="secondary-btn legend-collapse-btn"
+              aria-expanded="true"
+              aria-controls="legend-card-body"
+            >
+              Collapse
+            </button>
+          </div>
+          <div id="legend-card-body" class="legend-card-body">
+            <div class="legend-row">
+              <span class="legend-swatch legend-swatch-route"></span>
+              <span>Recommended route</span>
+            </div>
+            <div class="legend-row">
+              <span class="legend-swatch legend-swatch-compare"></span>
+              <span>Imported comparison routes</span>
+            </div>
+            <div class="legend-row">
+              <span class="legend-swatch legend-swatch-source"></span>
+              <span>Source point</span>
+            </div>
+            <div class="legend-row">
+              <span class="legend-swatch legend-swatch-destination"></span>
+              <span>Destination point</span>
+            </div>
+            <div class="legend-divider"></div>
+            <div class="legend-row legend-row-split">
+              <span class="legend-title">Camera overlay</span>
+              <button id="camera-toggle-btn" type="button" class="secondary-btn traffic-toggle-btn">Show</button>
+            </div>
+            <p id="camera-overlay-status" class="legend-note">Camera overlay is off.</p>
+            <div class="legend-row">
+              <span class="legend-swatch legend-swatch-camera"></span>
+              <span>Configured camera locations</span>
+            </div>
+            <div class="legend-divider"></div>
+            <div class="legend-row legend-row-split">
+              <span class="legend-title">Traffic overlay</span>
+              <button id="traffic-toggle-btn" type="button" class="secondary-btn traffic-toggle-btn">Show</button>
+            </div>
+            <label class="legend-checkbox-row">
+              <input id="traffic-tertiary-filter-input" type="checkbox">
+              <span>Only tertiary and above</span>
+            </label>
+            <p id="traffic-overlay-status" class="legend-note">Traffic overlay is off.</p>
+            <div class="legend-row">
+              <span class="legend-swatch legend-swatch-traffic-green"></span>
+              <span>Baseline / free flow</span>
+            </div>
+            <div class="legend-row">
+              <span class="legend-swatch legend-swatch-traffic-yellow"></span>
+              <span>Moderately slower than baseline</span>
+            </div>
+            <div class="legend-row">
+              <span class="legend-swatch legend-swatch-traffic-red"></span>
+              <span>Heavily slower than baseline</span>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="/assets/cch-query.js" type="module"></script>
+  </body>
+</html>
