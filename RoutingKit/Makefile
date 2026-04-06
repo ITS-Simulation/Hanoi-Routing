@@ -6,7 +6,7 @@ LDFLAGS=
 OMP_CFLAGS=-fopenmp
 OMP_LDFLAGS=-fopenmp
 
-all: bin/compare_vector bin/compute_contraction_hierarchy bin/compute_geographic_distance_weights bin/compute_nested_dissection_order bin/convert_road_dimacs_coordinates bin/convert_road_dimacs_graph bin/decode_vector bin/encode_vector bin/examine_ch bin/export_road_dimacs_graph bin/generate_constant_vector bin/generate_dijkstra_rank_test_queries bin/generate_random_node_list bin/generate_random_source_times bin/generate_test_queries bin/graph_to_dot bin/graph_to_svg bin/osm_extract bin/randomly_permute_nodes bin/run_contraction_hierarchy_query bin/run_dijkstra bin/show_path bin/test_basic_features bin/test_bit_vector bin/test_buffered_asynchronous_reader bin/test_contraction_hierarchy_extra_weight bin/test_contraction_hierarchy_path_query bin/test_contraction_hierarchy_pinned_query bin/test_customizable_contraction_hierarchy bin/test_customizable_contraction_hierarchy_customization bin/test_customizable_contraction_hierarchy_path_query bin/test_customizable_contraction_hierarchy_perfect_customization bin/test_customizable_contraction_hierarchy_pinned_query bin/test_customizable_contraction_hierarchy_reset bin/test_dijkstra bin/test_geo_dist bin/test_google_polyline bin/test_id_mapper bin/test_id_set_queue bin/test_inverse_vector bin/test_nearest_neighbor bin/test_nested_dissection bin/test_osm_simple bin/test_permutation bin/test_protobuf bin/test_sort bin/test_strongly_connected_component bin/test_tag_map bin/conditional_turn_extract lib/libroutingkit.a lib/libroutingkit.so
+all: bin/compare_vector bin/compute_contraction_hierarchy bin/compute_geographic_distance_weights bin/compute_nested_dissection_order bin/conditional_turn_extract bin/convert_road_dimacs_coordinates bin/convert_road_dimacs_graph bin/decode_vector bin/encode_vector bin/examine_ch bin/export_road_dimacs_graph bin/generate_constant_vector bin/generate_dijkstra_rank_test_queries bin/generate_random_node_list bin/generate_random_source_times bin/generate_test_queries bin/graph_to_dot bin/graph_to_svg bin/osm_extract bin/randomly_permute_nodes bin/run_contraction_hierarchy_query bin/run_dijkstra bin/show_path bin/test_basic_features bin/test_bit_vector bin/test_buffered_asynchronous_reader bin/test_contraction_hierarchy_extra_weight bin/test_contraction_hierarchy_path_query bin/test_contraction_hierarchy_pinned_query bin/test_customizable_contraction_hierarchy bin/test_customizable_contraction_hierarchy_customization bin/test_customizable_contraction_hierarchy_path_query bin/test_customizable_contraction_hierarchy_perfect_customization bin/test_customizable_contraction_hierarchy_pinned_query bin/test_customizable_contraction_hierarchy_reset bin/test_dijkstra bin/test_geo_dist bin/test_google_polyline bin/test_id_mapper bin/test_id_set_queue bin/test_inverse_vector bin/test_nearest_neighbor bin/test_nested_dissection bin/test_osm_simple bin/test_permutation bin/test_protobuf bin/test_sort bin/test_strongly_connected_component bin/test_tag_map lib/libroutingkit.a lib/libroutingkit.so
 
 build/bit_select.o: src/bit_select.cpp src/bit_select.h src/emulate_gcc_builtin.h generate_make_file
 	@mkdir -p build
@@ -35,6 +35,18 @@ build/compute_geographic_distance_weights.o: include/routingkit/bit_vector.h inc
 build/compute_nested_dissection_order.o: include/routingkit/bit_vector.h include/routingkit/constants.h include/routingkit/inverse_vector.h include/routingkit/min_max.h include/routingkit/nested_dissection.h include/routingkit/permutation.h include/routingkit/sort.h include/routingkit/timer.h include/routingkit/vector_io.h src/compute_nested_dissection_order.cpp generate_make_file
 	@mkdir -p build
 	$(CC) $(CFLAGS)  -c src/compute_nested_dissection_order.cpp -o build/compute_nested_dissection_order.o
+
+build/conditional_restriction_decoder.o: include/routingkit/bit_vector.h include/routingkit/conditional_restriction_decoder.h include/routingkit/constants.h include/routingkit/inverse_vector.h include/routingkit/min_max.h include/routingkit/osm_decoder.h include/routingkit/osm_graph_builder.h include/routingkit/permutation.h include/routingkit/sort.h include/routingkit/tag_map.h src/conditional_restriction_decoder.cpp generate_make_file
+	@mkdir -p build
+	$(CC) $(CFLAGS)  -c src/conditional_restriction_decoder.cpp -o build/conditional_restriction_decoder.o
+
+build/conditional_restriction_resolver.o: include/routingkit/bit_vector.h include/routingkit/conditional_restriction_decoder.h include/routingkit/conditional_restriction_resolver.h include/routingkit/constants.h include/routingkit/filter.h include/routingkit/graph_util.h include/routingkit/id_mapper.h include/routingkit/inverse_vector.h include/routingkit/min_max.h include/routingkit/osm_decoder.h include/routingkit/osm_graph_builder.h include/routingkit/osm_profile.h include/routingkit/permutation.h include/routingkit/sort.h include/routingkit/tag_map.h include/routingkit/vector_io.h src/conditional_restriction_resolver.cpp generate_make_file
+	@mkdir -p build
+	$(CC) $(CFLAGS)  -c src/conditional_restriction_resolver.cpp -o build/conditional_restriction_resolver.o
+
+build/conditional_turn_extract.o: include/routingkit/bit_vector.h include/routingkit/conditional_restriction_decoder.h include/routingkit/conditional_restriction_resolver.h include/routingkit/constants.h include/routingkit/inverse_vector.h include/routingkit/min_max.h include/routingkit/osm_condition_parser.h include/routingkit/osm_decoder.h include/routingkit/osm_graph_builder.h include/routingkit/osm_profile.h include/routingkit/permutation.h include/routingkit/sort.h include/routingkit/tag_map.h include/routingkit/timer.h include/routingkit/vector_io.h src/conditional_turn_extract.cpp generate_make_file
+	@mkdir -p build
+	$(CC) $(CFLAGS)  -c src/conditional_turn_extract.cpp -o build/conditional_turn_extract.o
 
 build/contraction_hierarchy.o: include/routingkit/bit_vector.h include/routingkit/constants.h include/routingkit/contraction_hierarchy.h include/routingkit/graph_util.h include/routingkit/id_queue.h include/routingkit/inverse_vector.h include/routingkit/min_max.h include/routingkit/permutation.h include/routingkit/sort.h include/routingkit/timer.h include/routingkit/timestamp_flag.h include/routingkit/vector_io.h src/contraction_hierarchy.cpp generate_make_file
 	@mkdir -p build
@@ -123,6 +135,10 @@ build/id_mapper.o: include/routingkit/constants.h include/routingkit/id_mapper.h
 build/nested_dissection.o: include/routingkit/bit_vector.h include/routingkit/constants.h include/routingkit/filter.h include/routingkit/graph_util.h include/routingkit/id_mapper.h include/routingkit/inverse_vector.h include/routingkit/min_max.h include/routingkit/nested_dissection.h include/routingkit/permutation.h include/routingkit/sort.h include/routingkit/timer.h src/nested_dissection.cpp generate_make_file
 	@mkdir -p build
 	$(CC) $(CFLAGS)  -c src/nested_dissection.cpp -o build/nested_dissection.o
+
+build/osm_condition_parser.o: include/routingkit/osm_condition_parser.h src/osm_condition_parser.cpp generate_make_file
+	@mkdir -p build
+	$(CC) $(CFLAGS)  -c src/osm_condition_parser.cpp -o build/osm_condition_parser.o
 
 build/osm_decoder.o: include/routingkit/constants.h include/routingkit/inverse_vector.h include/routingkit/min_max.h include/routingkit/osm_decoder.h include/routingkit/permutation.h include/routingkit/sort.h include/routingkit/tag_map.h include/routingkit/timer.h src/buffered_asynchronous_reader.h src/file_data_source.h src/osm_decoder.cpp src/protobuf.h generate_make_file
 	@mkdir -p build
@@ -284,22 +300,6 @@ build/verify.o: src/verify.cpp src/verify.h generate_make_file
 	@mkdir -p build
 	$(CC) $(CFLAGS)  -c src/verify.cpp -o build/verify.o
 
-build/conditional_restriction_decoder.o: include/routingkit/bit_vector.h include/routingkit/conditional_restriction_decoder.h include/routingkit/constants.h include/routingkit/inverse_vector.h include/routingkit/min_max.h include/routingkit/osm_decoder.h include/routingkit/osm_graph_builder.h include/routingkit/permutation.h include/routingkit/sort.h include/routingkit/tag_map.h src/conditional_restriction_decoder.cpp generate_make_file
-	@mkdir -p build
-	$(CC) $(CFLAGS)  -c src/conditional_restriction_decoder.cpp -o build/conditional_restriction_decoder.o
-
-build/osm_condition_parser.o: include/routingkit/osm_condition_parser.h src/osm_condition_parser.cpp generate_make_file
-	@mkdir -p build
-	$(CC) $(CFLAGS)  -c src/osm_condition_parser.cpp -o build/osm_condition_parser.o
-
-build/conditional_restriction_resolver.o: include/routingkit/bit_vector.h include/routingkit/conditional_restriction_decoder.h include/routingkit/conditional_restriction_resolver.h include/routingkit/constants.h include/routingkit/filter.h include/routingkit/graph_util.h include/routingkit/id_mapper.h include/routingkit/inverse_vector.h include/routingkit/min_max.h include/routingkit/osm_decoder.h include/routingkit/osm_graph_builder.h include/routingkit/osm_profile.h include/routingkit/permutation.h include/routingkit/sort.h include/routingkit/tag_map.h include/routingkit/vector_io.h src/conditional_restriction_resolver.cpp generate_make_file
-	@mkdir -p build
-	$(CC) $(CFLAGS)  -c src/conditional_restriction_resolver.cpp -o build/conditional_restriction_resolver.o
-
-build/conditional_turn_extract.o: include/routingkit/bit_vector.h include/routingkit/conditional_restriction_decoder.h include/routingkit/conditional_restriction_resolver.h include/routingkit/constants.h include/routingkit/inverse_vector.h include/routingkit/min_max.h include/routingkit/osm_condition_parser.h include/routingkit/osm_decoder.h include/routingkit/osm_graph_builder.h include/routingkit/osm_profile.h include/routingkit/permutation.h include/routingkit/sort.h include/routingkit/tag_map.h include/routingkit/timer.h include/routingkit/vector_io.h src/conditional_turn_extract.cpp generate_make_file
-	@mkdir -p build
-	$(CC) $(CFLAGS)  -c src/conditional_turn_extract.cpp -o build/conditional_turn_extract.o
-
 bin/compare_vector: build/bit_vector.o build/compare_vector.o build/vector_io.o
 	@mkdir -p bin
 	$(CC) $(LDFLAGS) build/bit_vector.o build/compare_vector.o build/vector_io.o -pthread  -o bin/compare_vector
@@ -315,6 +315,10 @@ bin/compute_geographic_distance_weights: build/bit_vector.o build/compute_geogra
 bin/compute_nested_dissection_order: build/bit_select.o build/bit_vector.o build/compute_nested_dissection_order.o build/graph_util.o build/id_mapper.o build/nested_dissection.o build/timer.o build/vector_io.o
 	@mkdir -p bin
 	$(CC) $(LDFLAGS) build/bit_select.o build/bit_vector.o build/compute_nested_dissection_order.o build/graph_util.o build/id_mapper.o build/nested_dissection.o build/timer.o build/vector_io.o -pthread  -o bin/compute_nested_dissection_order
+
+bin/conditional_turn_extract: build/bit_select.o build/bit_vector.o build/buffered_asynchronous_reader.o build/conditional_restriction_decoder.o build/conditional_restriction_resolver.o build/conditional_turn_extract.o build/file_data_source.o build/graph_util.o build/id_mapper.o build/osm_condition_parser.o build/osm_decoder.o build/osm_graph_builder.o build/osm_profile.o build/protobuf.o build/timer.o build/vector_io.o
+	@mkdir -p bin
+	$(CC) $(LDFLAGS) build/bit_select.o build/bit_vector.o build/buffered_asynchronous_reader.o build/conditional_restriction_decoder.o build/conditional_restriction_resolver.o build/conditional_turn_extract.o build/file_data_source.o build/graph_util.o build/id_mapper.o build/osm_condition_parser.o build/osm_decoder.o build/osm_graph_builder.o build/osm_profile.o build/protobuf.o build/timer.o build/vector_io.o -lm -lz -pthread  -o bin/conditional_turn_extract
 
 bin/convert_road_dimacs_coordinates: build/bit_vector.o build/convert_road_dimacs_coordinates.o build/vector_io.o
 	@mkdir -p bin
@@ -491,10 +495,6 @@ bin/test_strongly_connected_component: build/expect.o build/strongly_connected_c
 bin/test_tag_map: build/expect.o build/test_tag_map.o
 	@mkdir -p bin
 	$(CC) $(LDFLAGS) build/expect.o build/test_tag_map.o  -o bin/test_tag_map
-
-bin/conditional_turn_extract: build/bit_select.o build/bit_vector.o build/buffered_asynchronous_reader.o build/conditional_restriction_decoder.o build/conditional_restriction_resolver.o build/conditional_turn_extract.o build/file_data_source.o build/graph_util.o build/id_mapper.o build/osm_condition_parser.o build/osm_decoder.o build/osm_graph_builder.o build/osm_profile.o build/protobuf.o build/timer.o build/vector_io.o
-	@mkdir -p bin
-	$(CC) $(LDFLAGS) build/bit_select.o build/bit_vector.o build/buffered_asynchronous_reader.o build/conditional_restriction_decoder.o build/conditional_restriction_resolver.o build/conditional_turn_extract.o build/file_data_source.o build/graph_util.o build/id_mapper.o build/osm_condition_parser.o build/osm_decoder.o build/osm_graph_builder.o build/osm_profile.o build/protobuf.o build/timer.o build/vector_io.o -lm -lz -pthread  -o bin/conditional_turn_extract
 
 lib/libroutingkit.a: build/bit_select.o build/bit_vector.o build/buffered_asynchronous_reader.o build/conditional_restriction_decoder.o build/conditional_restriction_resolver.o build/contraction_hierarchy.o build/customizable_contraction_hierarchy.o build/file_data_source.o build/geo_position_to_node.o build/google_polyline.o build/graph_util.o build/id_mapper.o build/nested_dissection.o build/osm_condition_parser.o build/osm_decoder.o build/osm_graph_builder.o build/osm_profile.o build/osm_simple.o build/protobuf.o build/strongly_connected_component.o build/timer.o build/vector_io.o
 	@mkdir -p lib

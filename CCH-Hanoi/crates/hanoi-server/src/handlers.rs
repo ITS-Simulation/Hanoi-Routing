@@ -28,6 +28,8 @@ pub async fn handle_query(
         request: req,
         format: params.format,
         colors: params.colors.is_some(),
+        alternatives: params.alternatives.unwrap_or(0),
+        stretch: params.stretch.unwrap_or(hanoi_core::multi_route::DEFAULT_STRETCH),
         reply: tx,
     };
 

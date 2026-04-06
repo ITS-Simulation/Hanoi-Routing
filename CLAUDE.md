@@ -179,4 +179,5 @@ inventory
 workflow
 - For Plan mode: Every plan must be generated to `docs/planned/` folder
 - RoutingKit and rust_road_router is strictly forbidden to be touched. Under no circumstances should any plan consider touching these 2 repos
+- [IMPORTANT] Talk as concise as possible. No lengthy paragraph, no over-descriptive comments. Clear, concise, straight to the point (Perhaps like a caveman maybe :>)
 

@@ -28,6 +28,11 @@
 6. [How the Problems Combine](#6-how-the-problems-combine)
 7. [Proposed Fixes](#7-proposed-fixes)
 8. [Fix Priority Matrix](#8-fix-priority-matrix)
+8b. [Cross-Reference: kientx Branch vs dev-haihm](#8b-cross-reference-kientx-branch-vs-current-dev-haihm)
+9. [Concurrency Architecture Analysis](#9-concurrency-architecture-analysis)
+10. [Penalty-Based K-Shortest Paths — Concurrency Flow](#10-penalty-based-k-shortest-paths--concurrency-flow)
+11. [SeArCCH Feasibility in Current Architecture](#11-searcch-separator-based-alternative-paths--feasibility-in-current-architecture)
+12. [Solution Comparison: Penalty-Based vs SeArCCH](#12-solution-comparison-penalty-based-vs-searcch)
 
 ---
 
@@ -470,3 +475,476 @@ addresses the root structural issue but requires more implementation effort. Fix
 1-ALT (penalty-based) is a simpler alternative to full admissibility that still
 eliminates the problem. Fix 3 is a refinement best applied alongside Fix 1 or
 1-ALT.
+
+---
+
+## 8b. Cross-Reference: `kientx` Branch vs Current `dev-haihm`
+
+> Added 2026-04-06. The `kientx` branch (commit `8f02165`) contains the original
+> multi-route implementation. This section verifies the three problems against
+> that code and assesses portability to `dev-haihm`.
+
+### All Three Problems Are Confirmed in kientx
+
+| Problem | kientx evidence | Status on dev-haihm |
+|---------|----------------|---------------------|
+| **P1: No admissibility** | `multi_route.rs:216` — sort by raw distance only. No bounded stretch, no T-test, Jaccard is unweighted `HashSet<(NodeId, NodeId)>`. Geo filter `MAX_GEO_RATIO=2.0` applied late. | Same — `multi_route.rs` not present on dev-haihm (removed/never merged) |
+| **P2: Zero turn costs** | `generate_line_graph.rs:229` — U-turns `Some(0)`, all turns `Some(0)` | **Partially fixed**: U-turns now `Some(20_000)` (20s). Non-U-turns still `Some(0)`. User reports accurate angle-based turn costs further improve quality. |
+| **P3: Travel-time ranking** | `multi_route.rs:216` — `sort_unstable_by_key(…dist)` | Same — no composite scoring exists |
+
+### Impact of Turn Cost Fixes on Problem Severity
+
+With accurate turn costs (as the user confirms are now producing more reasonable
+paths), Problem 2 is substantially mitigated. This also indirectly reduces
+Problem 1's severity: via-node paths containing U-turns or sharp turns now carry
+real cost, making them less likely to survive the stretch filter. Problem 3
+remains unaffected — ranking is still pure travel-time.
+
+**Bottom line:** Accurate turn costs buy significant quality improvement even
+without admissibility checks. The via-node approach becomes viable for most
+urban queries once the cost model is realistic.
+
+### Structural Differences: What kientx Has That dev-haihm Doesn't
+
+| Component | kientx | dev-haihm |
+|-----------|--------|-----------|
+| `multi_route.rs` | Full via-node K-alternative engine (339 lines) | **Missing** |
+| `cch.rs` multi_query methods | `multi_query()`, `multi_query_coords()` on `QueryEngine` | **Missing** |
+| `line_graph.rs` multi_query methods | `multi_query()`, `multi_query_coords()`, `build_answer_from_lg_path()` on `LineGraphQueryEngine` | **Missing** |
+| `engine.rs` alternatives dispatch | `dispatch_normal/line_graph` accept `alternatives`+`stretch` | **Missing** |
+| `state.rs` QueryMsg fields | `alternatives: u32`, `stretch: f64` | **Missing** |
+| `types.rs` FormatParam fields | `alternatives: Option<u32>`, `stretch: Option<f64>` | **Missing** |
+| `handlers.rs` wiring | Passes `alternatives`+`stretch` from URL params to `QueryMsg` | **Missing** |
+| `engine.rs` multi-response | `format_multi_response()`, `answers_to_geojson()`, color palette | **Missing** |
+
+### Structural Differences: What dev-haihm Has That kientx Doesn't
+
+| Component | dev-haihm | kientx |
+|-----------|-----------|--------|
+| `QueryAnswer.route_arc_ids` | Per-path arc IDs for traffic overlay replay | **Missing** |
+| `QueryAnswer.weight_path_ids` | LG node path for weight-space replay | **Missing** |
+| `line_graph.rs` `original_arc_id_of_lg_node` | Maps LG nodes → original arcs (for split nodes) | **Missing** |
+| `line_graph.rs` `is_arc_roundabout` | Per-arc roundabout flag | **Missing** |
+| `geometry.rs` `refine_turns()` | Post-processing turn annotations | **Missing** (only `compute_turns()`) |
+| `camera_overlay.rs` | Camera location overlay endpoint | **Missing** |
+| `traffic.rs` | Traffic overlay endpoint | **Missing** |
+| `route_eval.rs` | Route replay/evaluation from GeoJSON | **Missing** |
+| `ui.rs` | Static UI serving | **Missing** |
+| `static/` (app.js, index.html, styles.css) | Full map UI | **Missing** |
+| `generate_line_graph.rs` turn costs | U-turn = 20s penalty | U-turn = 0ms (free) |
+
+### Can kientx Multi-Route Logic Be Ported to dev-haihm?
+
+**Yes**, with adaptation. The core `multi_route.rs` is self-contained and
+depends only on `rust_road_router` public API. The integration points need
+updates:
+
+1. **`multi_route.rs`** — drop in as-is. No changes needed.
+
+2. **`cch.rs` multi_query methods** — must add `route_arc_ids` and
+   `weight_path_ids` to `QueryAnswer` construction. kientx builds
+   `QueryAnswer` without them. Fix: call `reconstruct_arc_ids()` on each
+   alternative's node path (method already exists on `QueryEngine`).
+
+3. **`line_graph.rs` multi_query / build_answer_from_lg_path** — must add
+   `route_arc_ids` (map via `original_arc_id_of_lg_node`), `weight_path_ids`
+   (the LG node path), `is_arc_roundabout` param to `compute_turns`, and
+   `refine_turns()` call. The `build_answer_from_lg_path` helper from kientx
+   needs updating to match dev-haihm's richer `QueryAnswer` and turn pipeline.
+
+4. **Server integration** — add `alternatives`+`stretch` to `QueryMsg`,
+   `FormatParam`, `handlers.rs`. Add `format_multi_response` and
+   `answers_to_geojson` to `engine.rs`. These are additive — no conflicts
+   with existing dev-haihm server features.
+
+---
+
+## 9. Concurrency Architecture Analysis
+
+### 9.1 Upstream rust_road_router Server — Single-Threaded Query Loop
+
+The Rocket server in `rust_road_router/server/src/main.rs` uses a
+**channel-per-request, single-consumer** architecture:
+
+```
+Rocket HTTP threads ──→ Mutex<Sender<Request>> ──→ mpsc channel ──→ single background thread
+                                                                      │
+                                                                      ├── Query: lock Arc<Mutex<Server>>, run, send result back
+                                                                      └── Customize: spawn scoped thread, clone travel_time,
+                                                                          re-customize, lock Server, swap weights
+```
+
+**Key objects:**
+
+| Object | Type | Sharing | Role |
+|--------|------|---------|------|
+| `Server<CustomizedBasic>` | `Arc<Mutex<_>>` | Shared via Arc+Mutex | CCH query engine (owns fw/bw distances, parents) |
+| `tx_query` | `Mutex<Sender<Request>>` | Rocket `State` | All HTTP threads send requests through this |
+| `rx_query` | `Receiver<Request>` | Owned by background thread | Single consumer processes queries sequentially |
+| `cch` | `CCH` | Borrowed (`&`) within `crossbeam::scope` | Immutable CCH topology |
+| `travel_time` | `Vec<Weight>` | Cloned per customization | Mutable weights — each customize gets a fresh copy |
+
+**Concurrency model:** All queries are **serialized** through one background
+thread. The `Arc<Mutex<Server>>` lock is held for the duration of each query.
+Customization runs on a separate `crossbeam` scoped thread, acquires the same
+mutex to swap in the new `CustomizedBasic`, then releases. During customization,
+queries block on the mutex.
+
+### 9.2 CCH-Hanoi — hanoi-server (Axum, Sequential Background Engine)
+
+`hanoi-server` uses **Axum 0.8** with a single background engine thread,
+communicating via `tokio::sync::mpsc` (queries) and `tokio::sync::watch`
+(weight updates).
+
+```
+Axum HTTP handlers ──→ mpsc::Sender<QueryMsg> ──→ background engine thread
+                                                      │
+                                                      ├── recv query → dispatch_normal/line_graph → reply via oneshot
+                                                      └── watch_rx.has_changed()? → engine.update_weights()
+                                                          (checked every 50ms timeout loop)
+```
+
+**No mutex on queries.** The engine thread processes queries sequentially — no
+lock contention. The `watch` channel for customization is checked between
+queries (non-blocking).
+
+**Key objects:**
+
+| Object | Type | Role |
+|--------|------|------|
+| `AppState` | `#[derive(Clone)]`, injected into Axum handlers | Shared state: `mpsc::Sender`, `watch::Sender`, `Arc<AtomicBool>` flags |
+| `QueryMsg` | struct with `QueryRequest` + `oneshot::Sender` | Per-request message to engine thread |
+| `CchContext` | Owns `GraphData`, `CCH`, `baseline_weights` | Immutable after construction. Metric-independent. |
+| `QueryEngine<'a>` | Borrows `&'a CchContext`, owns `CchQueryServer` | Per-engine mutable state (distances, parents inside CchQueryServer) |
+| `LineGraphCchContext` | Owns `GraphData`, `DirectedCCH`, reconstruction arrays | Immutable after construction |
+| `LineGraphQueryEngine<'a>` | Borrows `&'a LineGraphCchContext`, owns `CchQueryServer` | Per-engine mutable state |
+| `CchQueryServer` (aliased from upstream `query::Server`) | Owns `fw_distances`, `bw_distances`, `fw_parents`, `bw_parents` | Mutable scratch space — reset each query |
+
+Source files:
+- `CCH-Hanoi/crates/hanoi-server/src/state.rs` — `AppState`, `QueryMsg`
+- `CCH-Hanoi/crates/hanoi-server/src/engine.rs` — `run_normal()`, `run_line_graph()`
+- `CCH-Hanoi/crates/hanoi-server/src/main.rs` — Axum setup, dual-port listeners
+
+### 9.3 The CCH Query Server's Internal State
+
+`rust_road_router/engine/src/algo/customizable_contraction_hierarchy/query.rs`
+defines `Server<Customized>` with these per-query mutable fields:
+
+- `fw_distances: Vec<Weight>` — forward distances (reset to INFINITY after each
+  node via `reset_distance()`)
+- `bw_distances: Vec<Weight>` — backward distances (same)
+- `fw_parents: Vec<(NodeId, EdgeId)>` — forward parent pointers
+- `bw_parents: Vec<(NodeId, EdgeId)>` — backward parent pointers
+- `meeting_node: NodeId` — single best meeting node
+- `customized: C` — the customized CCH data (forward/backward shortcut weights
+  + unpacking info)
+
+The `query()` method takes `&mut self` — it is inherently **not thread-safe**.
+Each concurrent query needs its own `Server<Customized>` instance, or
+serialization via mutex.
+
+After a standard query, **distances are already reset** — common ancestors are
+not retained. Only the single best `meeting_node` survives.
+
+---
+
+## 10. Penalty-Based K-Shortest Paths — Concurrency Flow
+
+### 10.1 How It Would Work
+
+```
+Client request (s, t, k=3)
+│
+├── Query 1: standard CCH query → P₁ (shortest path)
+│   └── Collect edge set E₁
+│
+├── Query 2: penalize E₁ → re-customize → query → P₂
+│   └── penalty_weights[e] = 2× for e ∈ E₁
+│   └── customize_with(penalty_weights) → new CustomizedBasic
+│   └── Create temporary Server with new customization → query
+│   └── Collect edge set E₂
+│
+├── Query 3: penalize E₁ ∪ E₂ → re-customize → query → P₃
+│   └── ...
+│
+└── Return [P₁, P₂, P₃] with ORIGINAL distances
+```
+
+### 10.2 Key Rust Objects Involved
+
+**From hanoi-core (existing):**
+
+- `CchContext::customize_with(&self, weights: &[Weight])` — already exists,
+  creates `CustomizedBasic` from arbitrary weights. **This is the re-customize
+  entry point.**
+- `QueryEngine::update_weights(&mut self, weights: &[Weight])` — already exists,
+  calls `customize_with` + `server.update()`. Swaps customization in-place.
+- `LineGraphCchContext::customize_with(...)` — same for line graphs.
+- `LineGraphQueryEngine::update_weights(...)` — same.
+
+**From rust_road_router (upstream, read-only):**
+
+- `customize(&CCH, &metric)` / `customize_directed(&DirectedCCH, &metric)` —
+  Phase 2 functions.
+- `Server::new(customized)` — creates a fresh query server from a customization.
+- `Server::update(&mut self, customized)` — swaps in new customization, reuses
+  scratch buffers.
+- `Server::query(&mut self, Query)` — runs the bidirectional elimination tree
+  walk.
+
+**Existing upstream penalty code (read-only reference):**
+
+- `rust_road_router/engine/src/algo/ch_potentials/penalty.rs` — `Penalty<P>` and
+  `PenaltyIterative<'a>` structs. These use bidirectional A* with CH potentials
+  and an edge-penalty tracking vector (`times_penalized: Vec<u8>`). **Not CCH-based**
+  — uses Dijkstra on the topocore graph, not the elimination tree. Not integrated
+  with the CCH server. Useful as a design reference but not directly reusable for
+  our CCH pipeline.
+
+**New objects needed (in CCH-Hanoi):**
+
+- `penalty_weights: Vec<Weight>` — per-query temporary weight vector (clone of
+  `baseline_weights` with multiplied edges). Allocated per k-alternative
+  iteration.
+- No new upstream types needed.
+
+### 10.3 Concurrency for Multi-Client Serving
+
+**hanoi-server already uses the sequential background engine pattern.** The
+penalty-based k-paths flow fits naturally into `engine.rs::run_normal()` and
+`run_line_graph()` — the engine thread already owns a `&mut QueryEngine` and
+calls `engine.update_weights()` for customization.
+
+**Integration path for penalty k-paths in the existing architecture:**
+
+In the background engine loop (`engine.rs`), when a k-alternative query arrives:
+1. Uses its `QueryEngine` for query 1.
+2. Clones `baseline_weights` (from `CchContext`), applies penalties.
+3. Calls `engine.update_weights(&penalty_weights)` — re-customizes in-place.
+4. Queries again. Repeat for k iterations.
+5. Calls `engine.update_weights(&baseline_weights)` to restore.
+
+**Cost:** ~100–300ms per customization × (k−1) iterations. For k=3: ~200–600ms
+total penalty overhead on Hanoi-scale graphs.
+
+**Caveat:** While the engine is running a k-alternative query (300–900ms), all
+other queued requests wait. For a single-client scenario this is fine. For
+multi-client, consider:
+
+**Option A — Sequential (current model, simplest):** Accept the 300–900ms
+blocking. For Hanoi deployment with low QPS this is adequate.
+
+**Option B — Engine pool (parallel clients):** Spawn multiple background engine
+threads, each with its own `QueryEngine`. Route requests round-robin. The
+`CchContext` is immutable and can be shared via `Arc`.
+
+| Primitive | Use case |
+|-----------|----------|
+| `Arc<CchContext>` | Share immutable CCH topology + graph across engine threads |
+| Multiple `mpsc` channels | One per engine thread |
+| `tokio::task::spawn_blocking` | Offload CPU-heavy penalty loops from async runtime |
+
+---
+
+## 11. SeArCCH (Separator-Based Alternative Paths) — Feasibility in Current Architecture
+
+### 11.1 What Would Need to Change in rust_road_router
+
+The SeArCCH approach (§4 of the walkthrough doc) requires access to the
+**intermediate state** of the CCH query — specifically the forward and backward
+distances at all common ancestors **before they are reset**.
+
+Currently, `query.rs:77,82,102-103` calls `reset_distance()` on every visited
+node immediately after processing. The distances are gone by the time `query()`
+returns.
+
+**Minimal upstream changes needed:**
+
+1. **Expose elimination tree walk distances before reset.** Two sub-options:
+
+   - **(a) New `query_alternatives()` method** on `Server<C>` that runs the same
+     bidirectional walk but **skips `reset_distance()`** and returns a
+     `Vec<(NodeId, Weight, Weight)>` of `(common_ancestor, d(s,v), d(v,t))`
+     tuples. This is essentially what the existing multi-route code in the
+     investigation doc's §2 already does — but it needs to be done inside
+     `Server<C>` where the distances live.
+
+   - **(b) Expose `fw_distances` and `bw_distances` as public** (or
+     provide accessors). Let the caller read distances before they're reset.
+     Requires the caller to also trigger reset manually afterward.
+
+2. **Expose shortcut unpacking for partial path comparison.** The `unpack_path()`
+   method is already on `Server<C>` but is private. The `Customized` trait
+   already exposes `unpack_outgoing()` / `unpack_incoming()`. Deviation-point
+   finding (§5.1 of the walkthrough) can be done externally using the
+   `Customized` trait methods.
+
+3. **No structural changes to CCH topology, customization, or the elimination
+   tree.** The elimination tree is already accessible via `cch.elimination_tree()`.
+   Node order conversions via `cch.node_order().rank()` / `.node()` are public.
+
+**Summary: 1 new method or 2 accessor methods on `Server<C>`. No changes to
+CCH, Customized, EliminationTreeWalk, or any data structure.**
+
+### 11.2 What Would Be Built in CCH-Hanoi (No Upstream Changes)
+
+All admissibility logic lives in CCH-Hanoi:
+
+- **Common ancestor collection** — iterate elimination tree parent pointers,
+  intersect forward/backward visited sets.
+- **Four-check pipeline** — bounded stretch, limited sharing, T-test, total
+  stretch pruning.
+- **Recursive decomposition** (two-step / recursive variants).
+- **Edge marking infrastructure** — bitset over original edges for sharing checks.
+
+### 11.3 Elimination Tree Accessibility
+
+The elimination tree is **fully accessible** via:
+```
+cch.elimination_tree()  →  &[InRangeOption<NodeId>]
+```
+Each entry maps a node (by rank) to its parent in the elimination tree.
+`InRangeOption<NodeId>` is `None` for the root. Walking from any node to root:
+```rust
+let mut cur = Some(rank);
+while let Some(node) = cur {
+    cur = cch.elimination_tree()[node as usize].value();
+}
+```
+
+Common ancestors of `s` and `t` = intersection of their root-paths. This is
+already how the multi-route code works conceptually.
+
+---
+
+## 12. Solution Comparison: Penalty-Based vs SeArCCH
+
+### 12.1 Performance
+
+| Metric | Penalty-Based K-Paths | SeArCCH (Recursive, µ=0.3) |
+|--------|----------------------|---------------------------|
+| **Base query** | ~0.3ms (standard CCH) | ~0.3ms (standard CCH) |
+| **Per-alternative cost** | ~100–300ms (re-customization) + ~0.3ms (query) | ~2ms (extra CCH queries for T-test + deviation check) |
+| **Total for k=3** | ~300–900ms | ~6–10ms |
+| **Latency class** | Sub-second | Real-time (<50ms) |
+| **Scales with graph size** | Customization is O(m·log n) — grows with graph | Extra queries are O(n^0.5) — barely grows |
+
+**Verdict:** SeArCCH is **50–100× faster** for k-alternative generation. Penalty
+re-customization is the bottleneck — it's designed for weight updates, not
+per-query use.
+
+### 12.2 Feasibility
+
+| Aspect | Penalty-Based | SeArCCH |
+|--------|--------------|---------|
+| **Changes to rust_road_router** | **None** — uses existing `customize_with()` + `query()` | **Minimal** — 1 new method or 2 accessors on `Server<C>` |
+| **Changes to CCH-Hanoi** | Small — penalty weight logic + loop | Medium — admissibility pipeline, edge marking, recursive decomposition |
+| **Data requirements** | Same graph data, no extras | Same graph data, no extras |
+| **Risk of breaking upstream** | Zero | Very low (additive-only change) |
+
+### 12.3 Development Effort & Deployment
+
+| Aspect | Penalty-Based | SeArCCH |
+|--------|--------------|---------|
+| **Dev effort** | ~1–2 days | ~5–10 days |
+| **Testing complexity** | Simple (correctness = "is the penalty applied?") | Moderate (admissibility criteria have edge cases) |
+| **Deployment** | Drop-in — no pipeline changes, no data regeneration | Drop-in — no pipeline changes, no data regeneration |
+| **Incremental delivery** | Full solution in one PR | Can ship basic variant first (65% success), then two-step, then recursive |
+
+### 12.4 Maintenance
+
+| Aspect | Penalty-Based | SeArCCH |
+|--------|--------------|---------|
+| **Code surface** | ~50 lines in CCH-Hanoi | ~300–500 lines in CCH-Hanoi + ~20 lines upstream |
+| **Coupling to upstream** | Uses only public API | Requires 1 new upstream method (or pub accessors) |
+| **Parameter tuning** | Penalty multiplier (2×) — one knob | γ, ε, α, µ — four knobs (but literature defaults work well) |
+| **Future-proofing** | Limited — fundamentally a heuristic | Strong — same approach used by KIT's production systems |
+
+### 12.5 Quality of Alternatives
+
+| Aspect | Penalty-Based | SeArCCH |
+|--------|--------------|---------|
+| **Admissibility guarantees** | **None** — penalized paths may still share heavily or contain locally suboptimal segments | **Full** — bounded stretch, limited sharing, local optimality (T-test) |
+| **U-turn handling** | Indirectly mitigated by penalties on shared edges | Explicitly caught by bounded stretch + T-test |
+| **Success rate (1st alt)** | ~70–80% (empirical, no literature benchmark) | 90% (published benchmark on DIMACS Europe) |
+| **Success rate (3rd alt)** | Unknown | 44.7% (published) |
+| **Determinism** | Order-dependent — path k depends on paths 1..k−1 | Greedy but near-optimal (validated in paper §5.5) |
+
+### 12.6 Logic Core Comparison
+
+**Penalty-Based:**
+```
+for k in 1..K:
+    weights = baseline.clone()
+    for prev_path in accepted:
+        for edge in prev_path:
+            weights[edge] *= 2
+    customize(weights)  ← expensive
+    path = query(s, t)  ← cheap
+    if diverse(path, accepted):
+        accepted.push(path)
+```
+Core logic: weight manipulation → re-customize → query. Simple loop.
+
+**SeArCCH:**
+```
+(d_s, d_t, common_ancestors) = cch_query_with_distances(s, t)
+candidates = sort(common_ancestors, by: d_s[v] + d_t[v])
+for v in candidates:
+    if d_s[v] + d_t[v] > (1+ε) · d(s,t): break        ← total stretch
+    (a, b) = find_deviation_points(v, shortest_path)     ← partial unpack
+    if c(a→v→b) > (1+ε) · query(a,b): continue          ← bounded stretch
+    if sharing(path_via_v, marked_edges) > γ·d: continue ← limited sharing
+    if !t_test(v, a, b, path_via_v): continue            ← local optimality
+    accept(v); mark_edges(path_via_v)
+```
+Core logic: candidate filtering through 4 checks. More complex but more
+principled.
+
+### 12.7 Execution Flow Comparison
+
+```
+                    Penalty-Based                    SeArCCH
+                    ─────────────                    ───────
+Request arrives     │                                │
+                    ▼                                ▼
+              CCH query (P₁)                   CCH query (modified: keep distances)
+                    │                                │
+                    ▼                                ▼
+              Clone weights                    Collect common ancestors A
+              Apply 2× penalty                 Sort by via-path length
+                    │                                │
+                    ▼                                ▼
+              Re-customize (100-300ms)         For each v ∈ A:
+                    │                            4-check pipeline (~0.5ms each)
+                    ▼                            Extra CCH query for T-test
+              CCH query (P₂)                        │
+                    │                                ▼
+                    ▼                          Recurse if needed (two-step)
+              Diversity check                       │
+                    │                                ▼
+              (repeat for P₃...)               Return accepted alternatives
+                    │                                │
+                    ▼                                ▼
+              Restore weights                  Done — no weight restoration needed
+              Return results                   Return results
+                    │                                │
+              Total: 300-900ms                 Total: 5-15ms
+```
+
+### 12.8 Recommendation
+
+**For immediate deployment: Penalty-Based** — zero upstream changes, trivial to
+implement, good enough for most use cases. Ship it alongside Fix 2 (turn
+penalties) for immediate quality improvement.
+
+**For production quality: SeArCCH** — superior in every dimension except
+development effort. The ~20-line upstream change is minimal and additive. The
+50–100× performance advantage makes it viable for real-time routing with
+multiple concurrent clients. Plan this as a follow-up after the penalty-based
+MVP proves the value of k-alternatives to stakeholders.
+
+**Phased approach:**
+1. **Now:** Fix 2 (turn penalties) + Fix 1-ALT (penalty-based k-paths) — 2–3 days
+2. **Next sprint:** SeArCCH basic variant (65% success, ~0.5ms) — 3–5 days
+3. **Following sprint:** SeArCCH recursive (90% success, ~2ms) — 3–5 days

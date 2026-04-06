@@ -48,7 +48,7 @@ pub fn run_normal(
         match msg {
             Ok(Some(qm)) => {
                 let resp =
-                    dispatch_normal(&mut engine, qm.request, qm.format.as_deref(), qm.colors);
+                    dispatch_normal(&mut engine, qm.request, qm.format.as_deref(), qm.colors, qm.alternatives, qm.stretch);
                 let _ = qm.reply.send(resp);
             }
             Ok(None) => break, // Channel closed — shutdown
@@ -90,7 +90,7 @@ pub fn run_line_graph(
         match msg {
             Ok(Some(qm)) => {
                 let resp =
-                    dispatch_line_graph(&mut engine, qm.request, qm.format.as_deref(), qm.colors);
+                    dispatch_line_graph(&mut engine, qm.request, qm.format.as_deref(), qm.colors, qm.alternatives, qm.stretch);
                 let _ = qm.reply.send(resp);
             }
             Ok(None) => break,
@@ -110,7 +110,24 @@ fn dispatch_normal(
     req: QueryRequest,
     format: Option<&str>,
     colors: bool,
+    alternatives: u32,
+    stretch: f64,
 ) -> Result<Value, CoordRejection> {
+    if alternatives > 0 {
+        let answers = if let (Some(flat), Some(flng), Some(tlat), Some(tlng)) =
+            (req.from_lat, req.from_lng, req.to_lat, req.to_lng)
+        {
+            engine.multi_query_coords((flat, flng), (tlat, tlng), alternatives as usize, stretch)?
+        } else if let (Some(from), Some(to)) = (req.from_node, req.to_node) {
+            engine.multi_query(from, to, alternatives as usize, stretch)
+        } else {
+            Vec::new()
+        };
+
+        tracing::info!(num_routes = answers.len(), "multi-route query completed");
+        return Ok(format_multi_response(answers, format, colors, "normal"));
+    }
+
     let answer = if let (Some(flat), Some(flng), Some(tlat), Some(tlng)) =
         (req.from_lat, req.from_lng, req.to_lat, req.to_lng)
     {
@@ -140,7 +157,24 @@ fn dispatch_line_graph(
     req: QueryRequest,
     format: Option<&str>,
     colors: bool,
+    alternatives: u32,
+    stretch: f64,
 ) -> Result<Value, CoordRejection> {
+    if alternatives > 0 {
+        let answers = if let (Some(flat), Some(flng), Some(tlat), Some(tlng)) =
+            (req.from_lat, req.from_lng, req.to_lat, req.to_lng)
+        {
+            engine.multi_query_coords((flat, flng), (tlat, tlng), alternatives as usize, stretch)?
+        } else if let (Some(from), Some(to)) = (req.from_node, req.to_node) {
+            engine.multi_query(from, to, alternatives as usize, stretch)
+        } else {
+            Vec::new()
+        };
+
+        tracing::info!(num_routes = answers.len(), "multi-route query completed");
+        return Ok(format_multi_response(answers, format, colors, "line_graph"));
+    }
+
     let answer = if let (Some(flat), Some(flng), Some(tlat), Some(tlng)) =
         (req.from_lat, req.from_lng, req.to_lat, req.to_lng)
     {
@@ -294,4 +328,108 @@ fn answer_to_geojson(answer: Option<QueryAnswer>, colors: bool, graph_type: &'st
             })
         }
     }
+}
+
+/// Color palette for multi-route visualization.
+const ROUTE_COLORS: &[&str] = &[
+    "#ff5500", "#0055ff", "#00aa44", "#aa00cc", "#cc8800",
+    "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
+];
+
+fn format_multi_response(
+    answers: Vec<QueryAnswer>,
+    format: Option<&str>,
+    colors: bool,
+    graph_type: &'static str,
+) -> Value {
+    match format {
+        Some("json") => {
+            let responses: Vec<QueryResponse> = answers
+                .into_iter()
+                .map(|a| answer_to_response(Some(a), graph_type))
+                .collect();
+            serde_json::to_value(responses).unwrap()
+        }
+        _ => answers_to_geojson(answers, colors, graph_type),
+    }
+}
+
+fn answers_to_geojson(
+    answers: Vec<QueryAnswer>,
+    colors: bool,
+    graph_type: &'static str,
+) -> Value {
+    if answers.is_empty() {
+        return serde_json::json!({
+            "type": "FeatureCollection",
+            "features": []
+        });
+    }
+
+    let features: Vec<Value> = answers
+        .into_iter()
+        .enumerate()
+        .map(|(idx, a)| {
+            let QueryAnswer {
+                distance_ms,
+                distance_m,
+                route_arc_ids,
+                weight_path_ids,
+                path,
+                coordinates,
+                turns,
+                origin,
+                destination,
+            } = a;
+
+            let coords: Vec<[f32; 2]> = coordinates
+                .iter()
+                .map(|&(lat, lng)| [lng, lat])
+                .collect();
+
+            let mut props = serde_json::json!({
+                "source": "hanoi_server",
+                "export_version": 1,
+                "graph_type": graph_type,
+                "distance_ms": distance_ms,
+                "distance_m": distance_m,
+                "path_nodes": path,
+                "route_arc_ids": route_arc_ids,
+                "weight_path_ids": weight_path_ids,
+                "route_index": idx,
+            });
+
+            let obj = props.as_object_mut().unwrap();
+            if let Some((lat, lng)) = origin {
+                obj.insert("origin".into(), serde_json::json!([lat, lng]));
+            }
+            if let Some((lat, lng)) = destination {
+                obj.insert("destination".into(), serde_json::json!([lat, lng]));
+            }
+            if !turns.is_empty() {
+                obj.insert("turns".into(), serde_json::to_value(turns).unwrap());
+            }
+            if colors {
+                let color = ROUTE_COLORS[idx % ROUTE_COLORS.len()];
+                obj.insert("stroke".into(), serde_json::json!(color));
+                obj.insert("stroke-width".into(), serde_json::json!(if idx == 0 { 10 } else { 6 }));
+                obj.insert("fill".into(), serde_json::json!(color));
+                obj.insert("fill-opacity".into(), serde_json::json!(0.3));
+            }
+
+            serde_json::json!({
+                "type": "Feature",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": coords
+                },
+                "properties": props
+            })
+        })
+        .collect();
+
+    serde_json::json!({
+        "type": "FeatureCollection",
+        "features": features
+    })
 }

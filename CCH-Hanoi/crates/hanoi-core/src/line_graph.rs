@@ -12,6 +12,7 @@ use rust_road_router::io::Load;
 
 use crate::bounds::{BoundingBox, CoordRejection, ValidationConfig};
 use crate::cch::{QueryAnswer, route_distance_m};
+use crate::multi_route::{GEO_OVER_REQUEST, MAX_GEO_RATIO, MultiRouteServer};
 use crate::geometry::{compute_turns, refine_turns};
 use crate::graph::GraphData;
 use crate::spatial::{SNAP_MAX_CANDIDATES, SpatialIndex};
@@ -501,6 +502,211 @@ impl<'a> LineGraphQueryEngine<'a> {
         answer.origin = Some(from);
         answer.destination = Some(to);
         answer
+    }
+
+    fn build_answer_from_lg_path(
+        &self,
+        cch_distance: Weight,
+        lg_path: &[NodeId],
+        source_edge_cost: Weight,
+        trimmed: bool,
+    ) -> Option<QueryAnswer> {
+        if lg_path.is_empty() {
+            return None;
+        }
+
+        let distance_ms = cch_distance.saturating_add(source_edge_cost);
+
+        let effective_path: &[NodeId] = if trimmed && lg_path.len() > 2 {
+            &lg_path[1..lg_path.len() - 1]
+        } else if trimmed {
+            &[]
+        } else {
+            lg_path
+        };
+
+        let route_arc_ids: Vec<u32> = effective_path
+            .iter()
+            .map(|&lg_node| self.context.original_arc_id_of_lg_node[lg_node as usize])
+            .collect();
+        let weight_path_ids: Vec<u32> = lg_path.iter().map(|&lg_node| lg_node as u32).collect();
+
+        let mut path: Vec<NodeId> = effective_path
+            .iter()
+            .map(|&lg_node| self.context.original_tail[lg_node as usize])
+            .collect();
+
+        if trimmed {
+            if let Some(&last_edge) = effective_path.last() {
+                path.push(self.context.original_head[last_edge as usize]);
+            } else if lg_path.len() >= 2 {
+                path.push(self.context.original_head[lg_path[0] as usize]);
+            }
+        } else if let Some(&last_edge) = lg_path.last() {
+            path.push(self.context.original_head[last_edge as usize]);
+        }
+
+        let coordinates: Vec<(f32, f32)> = path
+            .iter()
+            .map(|&node| {
+                (
+                    self.context.original_latitude[node as usize],
+                    self.context.original_longitude[node as usize],
+                )
+            })
+            .collect();
+
+        let mut turns = compute_turns(
+            effective_path,
+            &self.context.original_tail,
+            &self.context.original_head,
+            &self.context.original_first_out,
+            &self.context.original_latitude,
+            &self.context.original_longitude,
+            &self.context.is_arc_roundabout,
+        );
+        refine_turns(&mut turns, &coordinates);
+
+        let distance_m = route_distance_m(&coordinates);
+
+        Some(QueryAnswer {
+            distance_ms,
+            distance_m,
+            route_arc_ids,
+            weight_path_ids,
+            path,
+            coordinates,
+            turns,
+            origin: None,
+            destination: None,
+        })
+    }
+
+    /// Find up to `max_alternatives` alternative routes by line-graph node IDs
+    /// (= original edge indices). Each route gets source-edge correction,
+    /// LG->original node mapping, and turn annotation.
+    pub fn multi_query(
+        &self,
+        source_edge: EdgeId,
+        target_edge: EdgeId,
+        max_alternatives: usize,
+        stretch_factor: f64,
+    ) -> Vec<QueryAnswer> {
+        let customized = self.server.customized();
+        let mut multi = MultiRouteServer::new(customized);
+        let request_count = max_alternatives
+            .saturating_mul(GEO_OVER_REQUEST)
+            .max(max_alternatives + 10);
+        let candidates = multi.multi_query(
+            source_edge as NodeId,
+            target_edge as NodeId,
+            request_count,
+            stretch_factor,
+        );
+
+        let source_edge_cost = self.context.original_travel_time[source_edge as usize];
+
+        let mut results: Vec<QueryAnswer> = Vec::with_capacity(max_alternatives);
+        let mut shortest_geo_dist: Option<f64> = None;
+
+        for alt in candidates {
+            if results.len() >= max_alternatives {
+                break;
+            }
+            if let Some(answer) =
+                self.build_answer_from_lg_path(alt.distance, &alt.path, source_edge_cost, false)
+            {
+                if let Some(base) = shortest_geo_dist {
+                    if answer.distance_m > base * MAX_GEO_RATIO {
+                        continue;
+                    }
+                } else {
+                    shortest_geo_dist = Some(answer.distance_m);
+                }
+                results.push(answer);
+            }
+        }
+
+        results
+    }
+
+    /// Find up to `max_alternatives` alternative routes by coordinates.
+    /// Snaps in the original graph coordinate space, then runs multi_query on
+    /// the snapped edge IDs with trimming.
+    pub fn multi_query_coords(
+        &self,
+        from: (f32, f32),
+        to: (f32, f32),
+        max_alternatives: usize,
+        stretch_factor: f64,
+    ) -> Result<Vec<QueryAnswer>, CoordRejection> {
+        let src_snaps = self.original_spatial.validated_snap_candidates(
+            "origin",
+            from.0,
+            from.1,
+            &self.validation_config,
+            SNAP_MAX_CANDIDATES,
+        )?;
+        let dst_snaps = self.original_spatial.validated_snap_candidates(
+            "destination",
+            to.0,
+            to.1,
+            &self.validation_config,
+            SNAP_MAX_CANDIDATES,
+        )?;
+
+        for src in &src_snaps {
+            for dst in &dst_snaps {
+                let customized = self.server.customized();
+                let mut multi = MultiRouteServer::new(customized);
+                let request_count = max_alternatives
+                    .saturating_mul(GEO_OVER_REQUEST)
+                    .max(max_alternatives + 10);
+                let candidates = multi.multi_query(
+                    src.edge_id as NodeId,
+                    dst.edge_id as NodeId,
+                    request_count,
+                    stretch_factor,
+                );
+
+                if candidates.is_empty() {
+                    continue;
+                }
+
+                let source_edge_cost = self.context.original_travel_time[src.edge_id as usize];
+
+                let mut answers: Vec<QueryAnswer> = Vec::with_capacity(max_alternatives);
+                let mut shortest_geo_dist: Option<f64> = None;
+
+                for alt in candidates {
+                    if answers.len() >= max_alternatives {
+                        break;
+                    }
+                    if let Some(answer) = self.build_answer_from_lg_path(
+                        alt.distance,
+                        &alt.path,
+                        source_edge_cost,
+                        true,
+                    ) {
+                        let answer = Self::patch_coordinates(answer, from, to);
+                        if let Some(base) = shortest_geo_dist {
+                            if answer.distance_m > base * MAX_GEO_RATIO {
+                                continue;
+                            }
+                        } else {
+                            shortest_geo_dist = Some(answer.distance_m);
+                        }
+                        answers.push(answer);
+                    }
+                }
+
+                if !answers.is_empty() {
+                    return Ok(answers);
+                }
+            }
+        }
+
+        Ok(Vec::new())
     }
 
     /// Apply new weights and re-customize (directed variant).

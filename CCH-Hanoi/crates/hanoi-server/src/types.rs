@@ -31,6 +31,8 @@ pub struct FormatParam {
     /// When present (any value or empty), adds simplestyle-spec visualization
     /// properties (stroke, stroke-width, fill, fill-opacity) to GeoJSON output.
     pub colors: Option<String>,
+    pub alternatives: Option<u32>,
+    pub stretch: Option<f64>,
 }
 
 #[derive(Deserialize)]
