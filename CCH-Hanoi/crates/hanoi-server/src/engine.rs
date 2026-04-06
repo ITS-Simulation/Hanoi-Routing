@@ -353,7 +353,7 @@ fn format_multi_response(answers: Vec<QueryAnswer>, format: Option<&str>, colors
         Some("json") => {
             let responses: Vec<QueryResponse> = answers
                 .into_iter()
-                .map(|a| answer_to_response(Some(a)))
+                .map(|a| answer_to_response(Some(a), "multi"))
                 .collect();
             serde_json::to_value(responses).unwrap()
         }

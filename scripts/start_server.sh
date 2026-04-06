@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO=/mnt/c/ITS/Routing/Hanoi-Routing
+REPO=C:/ITS/Routing/Hanoi-Routing
 PROFILE="${1:-motorcycle}"
 DATA_DIR="$REPO/Maps/data/hanoi_$PROFILE"
 GRAPH_DIR="$DATA_DIR/graph"
 LINE_GRAPH_DIR="$DATA_DIR/line_graph"
-SERVER_BIN="$REPO/CCH-Hanoi/target/release/hanoi_server"
+SERVER_BIN="$REPO/CCH-Hanoi/target/release/hanoi_server.exe"
 
 export LD_LIBRARY_PATH="$REPO/RoutingKit/lib:${LD_LIBRARY_PATH:-}"
 

@@ -267,6 +267,130 @@ impl<'a> QueryEngine<'a> {
         self.server.update(new_customized);
     }
 
+    /// Find up to `max_alternatives` alternative routes between two node IDs.
+    pub fn multi_query(
+        &self,
+        from: NodeId,
+        to: NodeId,
+        max_alternatives: usize,
+        stretch_factor: f64,
+    ) -> Vec<QueryAnswer> {
+        let customized = self.server.customized();
+        let mut multi = MultiRouteServer::new(customized);
+        let request_count = max_alternatives.saturating_mul(GEO_OVER_REQUEST).max(max_alternatives + 10);
+
+        let lat = &self.context.graph.latitude;
+        let lng = &self.context.graph.longitude;
+        let path_geo_len = |path: &[NodeId]| -> f64 {
+            path.windows(2)
+                .map(|w| {
+                    crate::spatial::haversine_m(
+                        lat[w[0] as usize] as f64,
+                        lng[w[0] as usize] as f64,
+                        lat[w[1] as usize] as f64,
+                        lng[w[1] as usize] as f64,
+                    )
+                })
+                .sum()
+        };
+
+        let graph = &self.context.graph;
+        let edge_cost = |tail: NodeId, head_node: NodeId| -> Weight {
+            let start = graph.first_out[tail as usize] as usize;
+            let end = graph.first_out[tail as usize + 1] as usize;
+            for i in start..end {
+                if graph.head[i] == head_node {
+                    return graph.travel_time[i];
+                }
+            }
+            INFINITY
+        };
+
+        let candidates = multi.multi_query(from, to, request_count, stretch_factor, path_geo_len, edge_cost);
+
+        let mut results: Vec<QueryAnswer> = Vec::with_capacity(max_alternatives);
+        let mut shortest_geo_dist: Option<f64> = None;
+
+        for alt in candidates {
+            if results.len() >= max_alternatives {
+                break;
+            }
+            let coordinates: Vec<(f32, f32)> = alt
+                .path
+                .iter()
+                .map(|&node| (lat[node as usize], lng[node as usize]))
+                .collect();
+            let distance_m = route_distance_m(&coordinates);
+            if let Some(base) = shortest_geo_dist {
+                if distance_m > base * MAX_GEO_RATIO {
+                    continue;
+                }
+            } else {
+                shortest_geo_dist = Some(distance_m);
+            }
+            let route_arc_ids = match self.reconstruct_arc_ids(&alt.path) {
+                Some(ids) => ids,
+                None => continue,
+            };
+            let weight_path_ids = route_arc_ids.clone();
+            results.push(QueryAnswer {
+                distance_ms: alt.distance,
+                distance_m,
+                route_arc_ids,
+                weight_path_ids,
+                path: alt.path,
+                coordinates,
+                turns: vec![],
+                origin: None,
+                destination: None,
+            });
+        }
+
+        results
+    }
+
+    /// Find up to `max_alternatives` alternative routes by coordinates.
+    pub fn multi_query_coords(
+        &self,
+        from: (f32, f32),
+        to: (f32, f32),
+        max_alternatives: usize,
+        stretch_factor: f64,
+    ) -> Result<Vec<QueryAnswer>, CoordRejection> {
+        let src_snaps = self.spatial.validated_snap_candidates(
+            "origin",
+            from.0,
+            from.1,
+            &self.validation_config,
+            SNAP_MAX_CANDIDATES,
+        )?;
+        let dst_snaps = self.spatial.validated_snap_candidates(
+            "destination",
+            to.0,
+            to.1,
+            &self.validation_config,
+            SNAP_MAX_CANDIDATES,
+        )?;
+
+        for src in &src_snaps {
+            for dst in &dst_snaps {
+                let s = src.nearest_node();
+                let d = dst.nearest_node();
+
+                let answers = self.multi_query(s, d, max_alternatives, stretch_factor);
+                if !answers.is_empty() {
+                    let answers = answers
+                        .into_iter()
+                        .map(|a| Self::patch_coordinates(a, from, to))
+                        .collect();
+                    return Ok(answers);
+                }
+            }
+        }
+
+        Ok(Vec::new())
+    }
+
     pub fn bbox(&self) -> &BoundingBox {
         self.spatial.bbox()
     }

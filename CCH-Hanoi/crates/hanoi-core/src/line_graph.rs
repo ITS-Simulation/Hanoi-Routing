@@ -512,12 +512,25 @@ impl<'a> LineGraphQueryEngine<'a> {
 
         let geo_len = self.lg_path_geo_len();
 
+        let lg_graph = &self.context.graph;
+        let edge_cost = |tail: NodeId, head_node: NodeId| -> Weight {
+            let start = lg_graph.first_out[tail as usize] as usize;
+            let end = lg_graph.first_out[tail as usize + 1] as usize;
+            for i in start..end {
+                if lg_graph.head[i] == head_node {
+                    return lg_graph.travel_time[i];
+                }
+            }
+            INFINITY
+        };
+
         let candidates = multi.multi_query(
             source_edge as NodeId,
             target_edge as NodeId,
             request_count,
             stretch_factor,
             geo_len,
+            edge_cost,
         );
 
         let source_edge_cost = self.context.original_travel_time[source_edge as usize];
@@ -580,12 +593,25 @@ impl<'a> LineGraphQueryEngine<'a> {
 
                 let geo_len = self.lg_path_geo_len();
 
+                let lg_graph = &self.context.graph;
+                let edge_cost = |tail: NodeId, head_node: NodeId| -> Weight {
+                    let start = lg_graph.first_out[tail as usize] as usize;
+                    let end = lg_graph.first_out[tail as usize + 1] as usize;
+                    for i in start..end {
+                        if lg_graph.head[i] == head_node {
+                            return lg_graph.travel_time[i];
+                        }
+                    }
+                    INFINITY
+                };
+
                 let candidates = multi.multi_query(
                     src.edge_id as NodeId,
                     dst.edge_id as NodeId,
                     request_count,
                     stretch_factor,
                     geo_len,
+                    edge_cost,
                 );
 
                 if candidates.is_empty() {
@@ -665,6 +691,7 @@ impl<'a> LineGraphQueryEngine<'a> {
             &self.context.original_first_out,
             &self.context.original_latitude,
             &self.context.original_longitude,
+            &self.context.is_arc_roundabout,
         );
 
         // Map LG path to original intersection nodes
@@ -695,9 +722,17 @@ impl<'a> LineGraphQueryEngine<'a> {
 
         let distance_m = route_distance_m(&coordinates);
 
+        let route_arc_ids: Vec<u32> = effective_path
+            .iter()
+            .map(|&lg_node| self.context.original_arc_id_of_lg_node[lg_node as usize])
+            .collect();
+        let weight_path_ids: Vec<u32> = lg_path.iter().map(|&lg_node| lg_node as u32).collect();
+
         Some(QueryAnswer {
             distance_ms,
             distance_m,
+            route_arc_ids,
+            weight_path_ids,
             path,
             coordinates,
             turns,

@@ -1,5 +1,42 @@
 # CHANGELOGS.md
 
+## 2026-04-06 — hanoi-core: Local Optimality (T-test) filter for alternative routes
+
+- **`hanoi-core/src/multi_route.rs`**: Added T-test (Local Optimality) filter
+  to the via-node alternative route pipeline. After the existing Bounded
+  Stretch and Limited Sharing checks, each candidate is now verified for
+  local optimality: a subpath of radius `T = 0.25 × d(s,t)` around the
+  via-vertex must satisfy `subpath_cost ≤ 1.25 × d(v', v'')`, where
+  `d(v', v'')` is the exact CCH shortest distance. Uses dedicated
+  `TimestampedVector<Weight>` scratch arrays for O(1)-amortised reset
+  between successive point-to-point CCH queries. New constants:
+  `LOCAL_OPT_T_FRACTION = 0.25`, `LOCAL_OPT_EPSILON = 0.25`. New methods:
+  `cch_point_distance()`, `check_local_optimality()`. `multi_query()`
+  signature extended with `edge_cost: impl Fn(NodeId, NodeId) -> Weight`.
+- **`hanoi-core/src/cch.rs`**: Updated `QueryEngine::multi_query()` to pass
+  an `edge_cost` closure that looks up travel_time from the original graph
+  CSR.
+- **`hanoi-core/src/line_graph.rs`**: Updated both `multi_query()` and
+  `multi_query_coords()` in `LineGraphQueryEngine` to pass an `edge_cost`
+  closure for the line graph CSR.
+
+## 2026-04-06 — hanoi-tools: Direction-based turn costs in line graph generation
+
+- **`hanoi-tools/src/bin/generate_line_graph.rs`**: Replaced flat turn cost
+  model (0 ms for all non-U-turns, 20s for U-turns) with direction-based
+  turn costs using `classify_turn()` from `hanoi-core::geometry`. Costs
+  reflect right-hand traffic (Vietnam): Straight 0ms, SlightRight 2s,
+  SlightLeft 3s, Right 5s, Left 7s, SharpRight 8s, SharpLeft 10s, UTurn 20s.
+  Roundabout variants use the same costs as their base direction.
+- **`hanoi-core/src/cch.rs`**: Added `multi_query()` and
+  `multi_query_coords()` to `QueryEngine` (normal graph) — previously only
+  available on `LineGraphQueryEngine`. Fixes CLI and server compile errors
+  for normal-graph multi-route dispatch.
+- **`hanoi-core/src/line_graph.rs`**: Added missing `route_arc_ids` and
+  `weight_path_ids` fields to `QueryAnswer` in `build_answer_from_lg_path()`.
+- **`hanoi-server/src/engine.rs`**: Fixed `answer_to_response()` call in
+  `format_multi_response()` to pass required `graph_type` argument.
+
 ## 2026-04-03 — docs: Data Pipeline documentation
 
 - Added `docs/Data Pipeline.md` — full data flow from OSM PBF through offline
