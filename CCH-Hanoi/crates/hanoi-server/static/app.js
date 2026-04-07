@@ -16,6 +16,17 @@ const COMPARE_ROUTE_COLORS = [
   "#ea580c",
   "#2f6fed",
 ];
+const QUERY_ROUTE_COLORS = [
+  "#139a73",
+  "#0e8bd8",
+  "#ff7a3d",
+  "#c4861a",
+  "#7b4dd8",
+  "#d94668",
+  "#00897b",
+  "#2f6fed",
+];
+const QUERY_ROUTE_LABELS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
 const TURN_LABELS = {
   straight: "Continue straight",
@@ -59,10 +70,14 @@ let cameraOverlayAvailable = true;
 let queryRouteFeatureCollection = null;
 let compareRoutes = [];
 let compareRouteIdCounter = 0;
+let activeQueryRouteIndex = 0;
+let lastQueryLatencyMs = null;
 
 const elements = {
   legendCard: document.getElementById("legend-card"),
   legendCollapseBtn: document.getElementById("legend-collapse-btn"),
+  sidebarCollapseBtn: document.getElementById("sidebar-collapse-btn"),
+  sidebarPeekBtn: document.getElementById("sidebar-peek-btn"),
   queryForm: document.getElementById("query-form"),
   refreshServerBtn: document.getElementById("refresh-server-btn"),
   resetWeightsBtn: document.getElementById("reset-weights-btn"),
@@ -79,6 +94,15 @@ const elements = {
   fromLngInput: document.getElementById("from-lng-input"),
   toLatInput: document.getElementById("to-lat-input"),
   toLngInput: document.getElementById("to-lng-input"),
+  queryModeNote: document.getElementById("query-mode-note"),
+  queryModeSingleBtn: document.getElementById("query-mode-single-btn"),
+  queryModeMultiBtn: document.getElementById("query-mode-multi-btn"),
+  queryViewBuildBtn: document.getElementById("query-view-build-btn"),
+  queryViewRoutesBtn: document.getElementById("query-view-routes-btn"),
+  queryViewTurnsBtn: document.getElementById("query-view-turns-btn"),
+  multiRouteControls: document.getElementById("multi-route-controls"),
+  queryAlternativesInput: document.getElementById("query-alternatives-input"),
+  queryStretchInput: document.getElementById("query-stretch-input"),
   swapPointsBtn: document.getElementById("swap-points-btn"),
   resetPointsBtn: document.getElementById("reset-points-btn"),
   runQueryBtn: document.getElementById("run-query-btn"),
@@ -121,13 +145,20 @@ const elements = {
   summaryTo: document.getElementById("summary-to"),
   summaryPoints: document.getElementById("summary-points"),
   summaryMode: document.getElementById("summary-mode"),
+  queryRouteCount: document.getElementById("query-route-count"),
+  queryRouteCaption: document.getElementById("query-route-caption"),
+  queryRouteList: document.getElementById("query-route-list"),
   turnList: document.getElementById("turn-list"),
+  queryViewPanels: document.querySelectorAll("[data-query-view-panel]"),
+  queryViewButtons: document.querySelectorAll("[data-query-view]"),
 };
 
 document.addEventListener("DOMContentLoaded", async () => {
   initMap();
   bindEvents();
   renderInputs();
+  renderSidebarState();
+  renderQueryModeState();
   renderLegendCardState();
   renderModeState();
   renderMarkers();
@@ -155,10 +186,15 @@ function loadState() {
         focusRouteAId: "",
         focusRouteBId: "",
         activeTarget: "from",
+        queryView: "build",
+        queryMode: "single",
+        queryAlternatives: "5",
+        queryStretch: "1.3",
         fromLat: "",
         fromLng: "",
         toLat: "",
         toLng: "",
+        sidebarCollapsed: false,
         legendCollapsed: false,
         cameraEnabled: false,
         trafficEnabled: false,
@@ -173,10 +209,15 @@ function loadState() {
       focusRouteAId: typeof parsed.focusRouteAId === "string" ? parsed.focusRouteAId : "",
       focusRouteBId: typeof parsed.focusRouteBId === "string" ? parsed.focusRouteBId : "",
       activeTarget: parsed.activeTarget === "to" ? "to" : "from",
+      queryView: parsed.queryView === "routes" || parsed.queryView === "turns" ? parsed.queryView : "build",
+      queryMode: parsed.queryMode === "multi" ? "multi" : "single",
+      queryAlternatives: typeof parsed.queryAlternatives === "string" ? parsed.queryAlternatives : "5",
+      queryStretch: typeof parsed.queryStretch === "string" ? parsed.queryStretch : "1.3",
       fromLat: typeof parsed.fromLat === "string" ? parsed.fromLat : "",
       fromLng: typeof parsed.fromLng === "string" ? parsed.fromLng : "",
       toLat: typeof parsed.toLat === "string" ? parsed.toLat : "",
       toLng: typeof parsed.toLng === "string" ? parsed.toLng : "",
+      sidebarCollapsed: parsed.sidebarCollapsed === true,
       legendCollapsed: parsed.legendCollapsed === true,
       cameraEnabled: parsed.cameraEnabled === true,
       trafficEnabled: parsed.trafficEnabled === true,
@@ -186,13 +227,18 @@ function loadState() {
     return {
       activeTab: "query",
       compareView: "all",
-        focusRouteAId: "",
-        focusRouteBId: "",
-        activeTarget: "from",
-        fromLat: "",
+      focusRouteAId: "",
+      focusRouteBId: "",
+      activeTarget: "from",
+      queryView: "build",
+      queryMode: "single",
+      queryAlternatives: "5",
+      queryStretch: "1.3",
+      fromLat: "",
       fromLng: "",
       toLat: "",
       toLng: "",
+      sidebarCollapsed: false,
       legendCollapsed: false,
       cameraEnabled: false,
       trafficEnabled: false,
@@ -231,22 +277,13 @@ function initMap() {
 
   routeHaloLayer = L.geoJSON(null, {
     pane: "routeHalo",
-    style: () => ({
-      className: "route-halo",
-      color: "#87ebc3",
-      weight: 18,
-      opacity: 0.28,
-    }),
+    style: (feature) => buildQueryRouteStyle(feature, { halo: true }),
   }).addTo(map);
 
   routeLineLayer = L.geoJSON(null, {
     pane: "routeLine",
-    style: () => ({
-      className: "route-main",
-      color: "#139a73",
-      weight: 8,
-      opacity: 0.94,
-    }),
+    style: (feature) => buildQueryRouteStyle(feature, { halo: false }),
+    onEachFeature: bindQueryRouteFeature,
   }).addTo(map);
 
   map.on("click", handleMapClick);
@@ -262,11 +299,18 @@ function initMap() {
 
 function bindEvents() {
   elements.legendCollapseBtn.addEventListener("click", handleLegendCollapse);
+  elements.sidebarCollapseBtn.addEventListener("click", toggleSidebarCollapsed);
+  elements.sidebarPeekBtn.addEventListener("click", () => setSidebarCollapsed(false));
   elements.queryForm.addEventListener("submit", handleQuerySubmit);
   elements.refreshServerBtn.addEventListener("click", refreshServerContext);
   elements.resetWeightsBtn.addEventListener("click", handleResetWeights);
   elements.workspaceQueryBtn.addEventListener("click", () => setActiveTab("query"));
   elements.workspaceCompareBtn.addEventListener("click", () => setActiveTab("compare"));
+  elements.queryViewBuildBtn.addEventListener("click", () => setQueryView("build"));
+  elements.queryViewRoutesBtn.addEventListener("click", () => setQueryView("routes"));
+  elements.queryViewTurnsBtn.addEventListener("click", () => setQueryView("turns"));
+  elements.queryModeSingleBtn.addEventListener("click", () => setQueryMode("single"));
+  elements.queryModeMultiBtn.addEventListener("click", () => setQueryMode("multi"));
   elements.swapPointsBtn.addEventListener("click", handleSwapPoints);
   elements.resetPointsBtn.addEventListener("click", handleResetPoints);
   elements.exportRouteBtn.addEventListener("click", handleExportRoute);
@@ -332,6 +376,16 @@ function bindEvents() {
     state.toLng = event.target.value;
     invalidateRoutePreview();
     renderMarkers();
+    saveState();
+  });
+  elements.queryAlternativesInput.addEventListener("input", (event) => {
+    state.queryAlternatives = event.target.value;
+    invalidateRoutePreview();
+    saveState();
+  });
+  elements.queryStretchInput.addEventListener("input", (event) => {
+    state.queryStretch = event.target.value;
+    invalidateRoutePreview();
     saveState();
   });
 }
@@ -438,6 +492,111 @@ function renderInputs() {
   elements.fromLngInput.value = state.fromLng;
   elements.toLatInput.value = state.toLat;
   elements.toLngInput.value = state.toLng;
+  elements.queryAlternativesInput.value = state.queryAlternatives;
+  elements.queryStretchInput.value = state.queryStretch;
+}
+
+function getQueryOptions() {
+  const alternativesInput = Number.parseInt(state.queryAlternatives, 10);
+  const stretchInput = Number.parseFloat(state.queryStretch);
+
+  return {
+    mode: state.queryMode === "multi" ? "multi" : "single",
+    alternatives: Number.isFinite(alternativesInput) && alternativesInput > 0
+      ? Math.min(alternativesInput, 20)
+      : 5,
+    stretch: Number.isFinite(stretchInput) && stretchInput >= 1
+      ? Math.min(stretchInput, 3)
+      : 1.3,
+  };
+}
+
+function getQueryRouteFeatures() {
+  return Array.isArray(queryRouteFeatureCollection?.features)
+    ? queryRouteFeatureCollection.features.filter((feature) => feature?.geometry?.type === "LineString")
+    : [];
+}
+
+function getFeatureRouteIndex(feature, fallbackIndex = 0) {
+  const value = Number(feature?.properties?.route_index);
+  return Number.isFinite(value) ? value : fallbackIndex;
+}
+
+function ensureActiveQueryRouteSelection() {
+  const features = getQueryRouteFeatures();
+  if (!features.length) {
+    activeQueryRouteIndex = 0;
+    return;
+  }
+
+  const hasActiveRoute = features.some((feature, index) => getFeatureRouteIndex(feature, index) === activeQueryRouteIndex);
+  if (!hasActiveRoute) {
+    activeQueryRouteIndex = getFeatureRouteIndex(features[0], 0);
+  }
+}
+
+function getSelectedQueryFeature() {
+  const features = getQueryRouteFeatures();
+  ensureActiveQueryRouteSelection();
+  return features.find((feature, index) => getFeatureRouteIndex(feature, index) === activeQueryRouteIndex) ?? features[0] ?? null;
+}
+
+function getQueryRouteColor(routeIndex) {
+  return QUERY_ROUTE_COLORS[Math.max(routeIndex, 0) % QUERY_ROUTE_COLORS.length];
+}
+
+function getQueryRouteLabel(routeIndex) {
+  const label = QUERY_ROUTE_LABELS[routeIndex] ?? String(routeIndex + 1);
+  return `Route ${label}`;
+}
+
+function getQueryRouteHeadline(routeIndex, routeCount) {
+  if (routeCount > 1 && routeIndex === 0) {
+    return "Primary Route";
+  }
+  return routeCount > 1 ? `Alternative ${getQueryRouteLabel(routeIndex).replace("Route ", "")}` : "Route";
+}
+
+function buildQueryRouteStyle(feature, { halo }) {
+  const routeIndex = getFeatureRouteIndex(feature);
+  const routeCount = getQueryRouteFeatures().length;
+  const isSelected = routeCount <= 1 || routeIndex === activeQueryRouteIndex;
+  const color = getQueryRouteColor(routeIndex);
+
+  if (halo) {
+    return {
+      className: `route-halo ${isSelected ? "route-halo-selected" : "route-halo-muted"}`,
+      color,
+      weight: isSelected ? 18 : 11,
+      opacity: isSelected ? 0.2 : 0.1,
+    };
+  }
+
+  return {
+    className: `route-main ${routeIndex === 0 ? "route-main-primary" : "route-main-alternative"} ${isSelected ? "route-main-selected" : "route-main-muted"}`,
+    color,
+    weight: isSelected ? (routeIndex === 0 ? 8 : 7) : 5,
+    opacity: isSelected ? 0.96 : 0.58,
+    lineCap: "round",
+    lineJoin: "round",
+  };
+}
+
+function bindQueryRouteFeature(feature, layer) {
+  const routeIndex = getFeatureRouteIndex(feature);
+  layer.on("click", () => {
+    setActiveQueryRoute(routeIndex, { focusMap: true });
+  });
+  layer.bindTooltip(formatQueryRouteTooltip(feature), {
+    sticky: true,
+    direction: "top",
+  });
+}
+
+function formatQueryRouteTooltip(feature) {
+  const routeIndex = getFeatureRouteIndex(feature);
+  const properties = feature?.properties ?? {};
+  return `${getQueryRouteLabel(routeIndex)} · ${formatDistance(properties.distance_m)} · ${formatTravelTime(properties.distance_ms)}`;
 }
 
 function setActiveTab(tab) {
@@ -453,11 +612,83 @@ function renderModeState() {
   elements.queryPanel.classList.toggle("active", isQueryTab);
   elements.comparePanel.classList.toggle("active", !isQueryTab);
   elements.workspaceCaption.textContent = isQueryTab
-    ? "Pick two endpoints on the map, query the server, then export the route as GeoJSON with replay metadata."
+    ? "Pick two endpoints on the map, request either a single route or a stack of alternatives, then export the result as GeoJSON with replay metadata."
     : "Load up to 10 exported GeoJSON routes and compare their travel time and distance under the current server weights.";
 
   renderPickerState();
+  renderQueryModeState();
+  renderQueryViewState();
   refreshDisplayedRoutes();
+}
+
+function setQueryMode(mode) {
+  const normalizedMode = mode === "multi" ? "multi" : "single";
+  if (state.queryMode === normalizedMode) {
+    return;
+  }
+  state.queryMode = normalizedMode;
+  renderQueryModeState();
+  invalidateRoutePreview();
+  saveState();
+}
+
+function renderQueryModeState() {
+  const isMulti = state.queryMode === "multi";
+  elements.queryModeSingleBtn.classList.toggle("active", !isMulti);
+  elements.queryModeMultiBtn.classList.toggle("active", isMulti);
+  elements.multiRouteControls.classList.toggle("active", isMulti);
+  elements.queryAlternativesInput.disabled = !isMulti;
+  elements.queryStretchInput.disabled = !isMulti;
+  elements.queryModeNote.textContent = isMulti
+    ? "Ask the server for a bounded set of diverse alternatives, then select a route to inspect in detail."
+    : "Request the best current route for this source and destination pair.";
+  elements.runQueryBtn.textContent = isMulti ? "Find Routes" : "Find Route";
+}
+
+function setQueryView(view) {
+  const normalizedView = view === "routes" || view === "turns" ? view : "build";
+  if (state.queryView === normalizedView) {
+    return;
+  }
+
+  state.queryView = normalizedView;
+  renderQueryViewState();
+  saveState();
+}
+
+function renderQueryViewState() {
+  const activeView = state.queryView === "routes" || state.queryView === "turns" ? state.queryView : "build";
+  elements.queryViewButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.queryView === activeView);
+  });
+  elements.queryViewPanels.forEach((panel) => {
+    const isActive = panel.dataset.queryViewPanel === activeView;
+    panel.classList.toggle("active", isActive);
+    panel.hidden = !isActive;
+  });
+}
+
+function toggleSidebarCollapsed() {
+  setSidebarCollapsed(!state.sidebarCollapsed);
+}
+
+function setSidebarCollapsed(collapsed) {
+  state.sidebarCollapsed = collapsed === true;
+  renderSidebarState();
+  saveState();
+}
+
+function renderSidebarState() {
+  document.body.classList.toggle("sidebar-collapsed", state.sidebarCollapsed);
+  elements.sidebarCollapseBtn.textContent = state.sidebarCollapsed ? "Expand Panel" : "Collapse Panel";
+  elements.sidebarCollapseBtn.setAttribute("aria-expanded", String(!state.sidebarCollapsed));
+  elements.sidebarPeekBtn.hidden = !state.sidebarCollapsed;
+
+  if (map) {
+    window.setTimeout(() => {
+      map.invalidateSize({ pan: false });
+    }, 240);
+  }
 }
 
 function setCompareView(view) {
@@ -923,10 +1154,14 @@ function handleResetPoints() {
   state.fromLng = "";
   state.toLat = "";
   state.toLng = "";
+  state.queryView = "build";
   queryRouteFeatureCollection = null;
   lastRouteGeometryPointCount = null;
+  lastQueryLatencyMs = null;
+  activeQueryRouteIndex = 0;
   renderInputs();
   renderMarkers();
+  renderQueryViewState();
   refreshDisplayedRoutes();
   renderEmptyRouteState();
   saveState();
@@ -940,15 +1175,27 @@ async function handleQuerySubmit(event) {
   if (!payload) {
     return;
   }
+  const queryOptions = getQueryOptions();
+  const queryParams = new URLSearchParams();
+  if (queryOptions.mode === "multi") {
+    queryParams.set("alternatives", String(queryOptions.alternatives));
+    queryParams.set("stretch", String(queryOptions.stretch));
+  }
+  const queryUrl = queryParams.toString() ? `/query?${queryParams.toString()}` : "/query";
 
   elements.runQueryBtn.disabled = true;
-  elements.runQueryBtn.textContent = "Routing…";
-  setBanner("Querying hanoi_server for GeoJSON…", "info");
+  elements.runQueryBtn.textContent = queryOptions.mode === "multi" ? "Finding routes…" : "Routing…";
+  setBanner(
+    queryOptions.mode === "multi"
+      ? "Querying hanoi_server for alternative routes…"
+      : "Querying hanoi_server for GeoJSON…",
+    "info",
+  );
 
   const startedAt = performance.now();
 
   try {
-    const response = await fetch("/query", {
+    const response = await fetch(queryUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -964,12 +1211,13 @@ async function handleQuerySubmit(event) {
     applyRouteResult(data, latencyMs);
   } catch (error) {
     queryRouteFeatureCollection = null;
+    lastQueryLatencyMs = null;
     refreshDisplayedRoutes();
     renderEmptyRouteState();
     setBanner(error instanceof Error ? error.message : String(error), "error");
   } finally {
     elements.runQueryBtn.disabled = false;
-    elements.runQueryBtn.textContent = "Find Route";
+    renderQueryModeState();
   }
 }
 
@@ -996,17 +1244,20 @@ function buildQueryPayload() {
 }
 
 function applyRouteResult(featureCollection, latencyMs) {
-  const normalized = normalizeRouteGeojson(featureCollection);
-  const feature = normalized.features[0] ?? null;
-  const geometry = feature?.geometry ?? null;
-  const properties = feature?.properties ?? {};
-  const turns = Array.isArray(properties.turns) ? properties.turns : [];
-  const coordinates = Array.isArray(geometry?.coordinates) ? geometry.coordinates : [];
-  lastRouteGeometryPointCount = coordinates.length;
+  const normalized = normalizeRouteGeojson(featureCollection, { preserveAllLineStrings: true });
+  const features = Array.isArray(normalized.features) ? normalized.features : [];
+  const firstFeature = features[0] ?? null;
+  const firstGeometry = firstFeature?.geometry ?? null;
+  lastRouteGeometryPointCount = Array.isArray(firstGeometry?.coordinates) ? firstGeometry.coordinates.length : null;
   queryRouteFeatureCollection = normalized;
+  lastQueryLatencyMs = latencyMs;
+  activeQueryRouteIndex = firstFeature ? getFeatureRouteIndex(firstFeature, 0) : 0;
+  state.queryView = "routes";
+  renderQueryViewState();
+  saveState();
   refreshDisplayedRoutes();
 
-  if (!geometry || geometry.type !== "LineString" || coordinates.length === 0) {
+  if (!firstGeometry || firstGeometry.type !== "LineString" || features.length === 0) {
     renderEmptyRouteState();
     elements.statLatency.textContent = `${Math.round(latencyMs)} ms`;
     elements.summaryFrom.textContent = formatCoordinateValue(state.fromLat, state.fromLng);
@@ -1022,21 +1273,11 @@ function applyRouteResult(featureCollection, latencyMs) {
     }
   }
 
-  elements.routeBadge.textContent = "Route ready";
-  elements.routeBadge.className = "soft-chip";
-  elements.statTime.textContent = formatTravelTime(properties.distance_ms);
-  elements.statDistance.textContent = formatDistance(properties.distance_m);
-  elements.statTurns.textContent = String(turns.length);
-  elements.statLatency.textContent = `${Math.round(latencyMs)} ms`;
-  elements.summaryFrom.textContent = formatCoordinateValue(state.fromLat, state.fromLng);
-  elements.summaryTo.textContent = formatCoordinateValue(state.toLat, state.toLng);
-  elements.summaryPoints.textContent = formatCount(coordinates.length);
-  elements.summaryMode.textContent = `GeoJSON / ${formatGraphType(properties.graph_type).toLowerCase()}`;
-
-  renderTurns(turns);
-  updateExportRouteButton();
+  renderSelectedQueryRoute();
   setBanner(
-    `Route loaded: ${formatTravelTime(properties.distance_ms)} over ${formatDistance(properties.distance_m)}.`,
+    features.length > 1
+      ? `Loaded ${features.length} routes in ${Math.round(latencyMs)} ms. ${getQueryRouteLabel(activeQueryRouteIndex)} is selected.`
+      : `Route loaded: ${formatTravelTime(firstFeature?.properties?.distance_ms)} over ${formatDistance(firstFeature?.properties?.distance_m)}.`,
     "success",
   );
 }
@@ -1052,16 +1293,168 @@ function renderEmptyRouteState() {
   elements.summaryTo.textContent = formatCoordinateValue(state.toLat, state.toLng);
   elements.summaryPoints.textContent = lastRouteGeometryPointCount == null ? "—" : formatCount(lastRouteGeometryPointCount);
   elements.summaryMode.textContent = "GeoJSON / coordinates";
+  elements.queryRouteCount.textContent = "0 routes";
+  elements.queryRouteCaption.textContent = "Run a query to populate the current route stack.";
+  elements.queryRouteList.className = "query-route-list empty";
+  elements.queryRouteList.textContent = "No route queried yet.";
   elements.turnList.className = "turn-list empty";
   elements.turnList.textContent = "No route queried yet.";
   updateExportRouteButton();
 }
 
 function invalidateRoutePreview() {
+  state.queryView = "build";
   queryRouteFeatureCollection = null;
   lastRouteGeometryPointCount = null;
+  lastQueryLatencyMs = null;
+  activeQueryRouteIndex = 0;
+  renderQueryViewState();
   refreshDisplayedRoutes();
   renderEmptyRouteState();
+}
+
+function renderSelectedQueryRoute() {
+  const features = getQueryRouteFeatures();
+  const selectedFeature = getSelectedQueryFeature();
+
+  if (!features.length || !selectedFeature) {
+    renderEmptyRouteState();
+    return;
+  }
+
+  const properties = selectedFeature.properties ?? {};
+  const geometry = selectedFeature.geometry ?? null;
+  const routeIndex = getFeatureRouteIndex(selectedFeature);
+  const turns = Array.isArray(properties.turns) ? properties.turns : [];
+  const coordinates = Array.isArray(geometry?.coordinates) ? geometry.coordinates : [];
+  const routeCount = features.length;
+  const graphType = formatGraphType(properties.graph_type).toLowerCase();
+
+  elements.routeBadge.textContent = routeCount > 1
+    ? `${getQueryRouteLabel(routeIndex)} selected`
+    : "Route ready";
+  elements.routeBadge.className = "soft-chip";
+  elements.statTime.textContent = formatTravelTime(properties.distance_ms);
+  elements.statDistance.textContent = formatDistance(properties.distance_m);
+  elements.statTurns.textContent = String(turns.length);
+  elements.statLatency.textContent = lastQueryLatencyMs == null ? "—" : `${Math.round(lastQueryLatencyMs)} ms`;
+  elements.summaryFrom.textContent = formatCoordinateValue(state.fromLat, state.fromLng);
+  elements.summaryTo.textContent = formatCoordinateValue(state.toLat, state.toLng);
+  elements.summaryPoints.textContent = formatCount(coordinates.length);
+  elements.summaryMode.textContent = `${routeCount > 1 ? "Multi-route" : "Single route"} / ${graphType}`;
+
+  renderQueryRouteList();
+  renderTurns(turns);
+  updateExportRouteButton();
+}
+
+function renderQueryRouteList() {
+  const features = getQueryRouteFeatures();
+  if (!features.length) {
+    elements.queryRouteCount.textContent = "0 routes";
+    elements.queryRouteCaption.textContent = "Run a query to populate the current route stack.";
+    elements.queryRouteList.className = "query-route-list empty";
+    elements.queryRouteList.textContent = "No route queried yet.";
+    return;
+  }
+
+  ensureActiveQueryRouteSelection();
+  const primaryTravelTime = Number(features[0]?.properties?.distance_ms) || 0;
+
+  elements.queryRouteCount.textContent = `${features.length} route${features.length === 1 ? "" : "s"}`;
+  elements.queryRouteCaption.textContent = features.length > 1
+    ? "Select a route to focus the summary, map emphasis, and maneuver list."
+    : "The current query returned a single route.";
+  elements.queryRouteList.className = "query-route-list";
+  elements.queryRouteList.innerHTML = features
+    .map((feature, index) => {
+      const properties = feature.properties ?? {};
+      const geometry = feature.geometry ?? {};
+      const routeIndex = getFeatureRouteIndex(feature, index);
+      const travelTime = Number(properties.distance_ms) || 0;
+      const distance = Number(properties.distance_m) || 0;
+      const pointCount = Array.isArray(geometry.coordinates) ? geometry.coordinates.length : 0;
+      const turnCount = Array.isArray(properties.turns) ? properties.turns.length : 0;
+      const color = getQueryRouteColor(routeIndex);
+      const isActive = routeIndex === activeQueryRouteIndex;
+      const travelTimeDelta = primaryTravelTime > 0
+        ? ((travelTime - primaryTravelTime) / primaryTravelTime) * 100
+        : 0;
+      const note = routeIndex === 0
+        ? "Reference route returned first by the server."
+        : `${travelTimeDelta >= 0 ? "+" : ""}${travelTimeDelta.toFixed(1)}% travel time vs the primary route.`;
+
+      return `
+        <article class="query-route-card${isActive ? " active" : ""}" data-route-index="${routeIndex}">
+          <div class="query-route-head">
+            <div class="query-route-name">
+              <span class="query-route-swatch" style="background:${color}"></span>
+              <div>
+                <p class="query-route-title">${escapeHtml(getQueryRouteHeadline(routeIndex, features.length))}</p>
+                <p class="query-route-meta">${escapeHtml(getQueryRouteLabel(routeIndex))}</p>
+              </div>
+            </div>
+            <span class="soft-chip">${isActive ? "Selected" : "Inspect"}</span>
+          </div>
+
+          <div class="query-metric-grid">
+            <div class="query-metric">
+              <span class="detail-label">Travel Time</span>
+              <span class="detail-value">${formatTravelTime(travelTime)}</span>
+            </div>
+            <div class="query-metric">
+              <span class="detail-label">Distance</span>
+              <span class="detail-value">${formatDistance(distance)}</span>
+            </div>
+            <div class="query-metric">
+              <span class="detail-label">Geometry Points</span>
+              <span class="detail-value">${formatCount(pointCount)}</span>
+            </div>
+            <div class="query-metric">
+              <span class="detail-label">Maneuvers</span>
+              <span class="detail-value">${formatCount(turnCount)}</span>
+            </div>
+          </div>
+
+          <p class="query-route-note"><strong>Selection note:</strong> ${escapeHtml(note)}</p>
+        </article>
+      `;
+    })
+    .join("");
+
+  elements.queryRouteList.querySelectorAll("[data-route-index]").forEach((card) => {
+    card.addEventListener("click", () => {
+      const routeIndex = Number(card.dataset.routeIndex);
+      setActiveQueryRoute(routeIndex, { focusMap: true });
+    });
+  });
+}
+
+function setActiveQueryRoute(routeIndex, { focusMap = false } = {}) {
+  if (!Number.isFinite(routeIndex)) {
+    return;
+  }
+
+  activeQueryRouteIndex = routeIndex;
+  refreshDisplayedRoutes();
+  renderSelectedQueryRoute();
+
+  if (focusMap && state.activeTab === "query") {
+    focusQueryRoute(routeIndex);
+  }
+}
+
+function focusQueryRoute(routeIndex) {
+  const feature = getQueryRouteFeatures().find((item, index) => getFeatureRouteIndex(item, index) === routeIndex);
+  const coordinates = Array.isArray(feature?.geometry?.coordinates) ? feature.geometry.coordinates : [];
+  if (!coordinates.length) {
+    return;
+  }
+
+  const bounds = L.latLngBounds(coordinates.map(([lng, lat]) => [lat, lng]));
+  if (bounds.isValid()) {
+    map.fitBounds(bounds, { padding: [48, 48] });
+  }
 }
 
 function renderTurns(turns) {
@@ -1110,6 +1503,7 @@ function refreshDisplayedRoutes() {
   clearCompareRouteLayers();
 
   if (state.activeTab === "query" && queryRouteFeatureCollection) {
+    ensureActiveQueryRouteSelection();
     routeHaloLayer.addData(queryRouteFeatureCollection);
     routeLineLayer.addData(queryRouteFeatureCollection);
   }
@@ -1153,21 +1547,21 @@ function renderCompareRouteLayers(routesToRender) {
   }
 }
 
-function normalizeRouteGeojson(value) {
+function normalizeRouteGeojson(value, { preserveAllLineStrings = false } = {}) {
   if (!value || typeof value !== "object") {
     throw new Error("GeoJSON must be a JSON object.");
   }
 
   if (value.type === "FeatureCollection") {
-    const feature = Array.isArray(value.features)
-      ? value.features.find((item) => item?.geometry?.type === "LineString")
-      : null;
-    if (!feature) {
+    const features = Array.isArray(value.features)
+      ? value.features.filter((item) => item?.geometry?.type === "LineString")
+      : [];
+    if (!features.length) {
       throw new Error("GeoJSON FeatureCollection must contain a LineString feature.");
     }
     return {
       type: "FeatureCollection",
-      features: [feature],
+      features: preserveAllLineStrings ? features : [features[0]],
     };
   }
 
@@ -1205,7 +1599,13 @@ function handleExportRoute() {
 
   const timestamp = new Date().toISOString().replaceAll(":", "-");
   downloadJson(queryRouteFeatureCollection, `route-${timestamp}.geojson`);
-  setBanner("Exported the current route as GeoJSON.", "success");
+  const routeCount = getQueryRouteFeatures().length;
+  setBanner(
+    routeCount > 1
+      ? `Exported ${routeCount} queried routes as GeoJSON.`
+      : "Exported the current route as GeoJSON.",
+    "success",
+  );
 }
 
 async function handleCompareFilesSelected(event) {

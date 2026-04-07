@@ -474,7 +474,7 @@ impl<'a> LineGraphQueryEngine<'a> {
                     dst_edge = dst.edge_id,
                     src_snap_dist_m = src.snap_distance_m,
                     dst_snap_dist_m = dst.snap_distance_m,
-                    "unified snap candidate pair: original edge IDs → line-graph node IDs"
+                    "unified snap candidate pair: original edge IDs -> line-graph node IDs"
                 );
 
                 if let Some(answer) = self.query_trimmed(src.edge_id, dst.edge_id) {
@@ -484,15 +484,10 @@ impl<'a> LineGraphQueryEngine<'a> {
                     if is_better {
                         best = Some(answer);
                     }
-                    break;
                 }
             }
-
-            if best.is_some() {
-                break;
-            }
         }
-
+        
         Ok(best.map(|answer| Self::patch_coordinates(answer, from, to)))
     }
 
@@ -597,11 +592,27 @@ impl<'a> LineGraphQueryEngine<'a> {
         let request_count = max_alternatives
             .saturating_mul(GEO_OVER_REQUEST)
             .max(max_alternatives + 10);
+        let geo_len = self.lg_path_geo_len();
+
+        let lg_graph = &self.context.graph;
+        let edge_cost = |tail: NodeId, head_node: NodeId| -> Weight {
+            let start = lg_graph.first_out[tail as usize] as usize;
+            let end = lg_graph.first_out[tail as usize + 1] as usize;
+            for i in start..end {
+                if lg_graph.head[i] == head_node {
+                    return lg_graph.travel_time[i];
+                }
+            }
+            INFINITY
+        };
+
         let candidates = multi.multi_query(
             source_edge as NodeId,
             target_edge as NodeId,
             request_count,
             stretch_factor,
+            geo_len,
+            edge_cost,
         );
 
         let source_edge_cost = self.context.original_travel_time[source_edge as usize];
@@ -662,11 +673,27 @@ impl<'a> LineGraphQueryEngine<'a> {
                 let request_count = max_alternatives
                     .saturating_mul(GEO_OVER_REQUEST)
                     .max(max_alternatives + 10);
+                let geo_len = self.lg_path_geo_len();
+
+                let lg_graph = &self.context.graph;
+                let edge_cost = |tail: NodeId, head_node: NodeId| -> Weight {
+                    let start = lg_graph.first_out[tail as usize] as usize;
+                    let end = lg_graph.first_out[tail as usize + 1] as usize;
+                    for i in start..end {
+                        if lg_graph.head[i] == head_node {
+                            return lg_graph.travel_time[i];
+                        }
+                    }
+                    INFINITY
+                };
+
                 let candidates = multi.multi_query(
                     src.edge_id as NodeId,
                     dst.edge_id as NodeId,
                     request_count,
                     stretch_factor,
+                    geo_len,
+                    edge_cost,
                 );
 
                 if candidates.is_empty() {
@@ -731,5 +758,27 @@ impl<'a> LineGraphQueryEngine<'a> {
     /// Access the underlying line graph CCH context.
     pub fn context(&self) -> &'a LineGraphCchContext {
         self.context
+    }
+
+    fn lg_path_geo_len(&self) -> impl Fn(&[NodeId]) -> f64 + '_ {
+        let orig_tail = &self.context.original_tail;
+        let orig_head = &self.context.original_head;
+        let orig_lat = &self.context.original_latitude;
+        let orig_lng = &self.context.original_longitude;
+
+        move |lg_path: &[NodeId]| -> f64 {
+            let mut coords: Vec<(f32, f32)> = lg_path
+                .iter()
+                .map(|&lg_node| {
+                    let node = orig_tail[lg_node as usize];
+                    (orig_lat[node as usize], orig_lng[node as usize])
+                })
+                .collect();
+            if let Some(&last) = lg_path.last() {
+                let node = orig_head[last as usize];
+                coords.push((orig_lat[node as usize], orig_lng[node as usize]));
+            }
+            route_distance_m(&coords)
+        }
     }
 }

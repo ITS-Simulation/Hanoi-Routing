@@ -248,7 +248,41 @@ impl<'a> QueryEngine<'a> {
         let request_count = max_alternatives
             .saturating_mul(GEO_OVER_REQUEST)
             .max(max_alternatives + 10);
-        let candidates = multi.multi_query(from, to, request_count, stretch_factor);
+        let lat = &self.context.graph.latitude;
+        let lng = &self.context.graph.longitude;
+        let path_geo_len = |path: &[NodeId]| -> f64 {
+            path.windows(2)
+                .map(|w| {
+                    crate::spatial::haversine_m(
+                        lat[w[0] as usize] as f64,
+                        lng[w[0] as usize] as f64,
+                        lat[w[1] as usize] as f64,
+                        lng[w[1] as usize] as f64,
+                    )
+                })
+                .sum()
+        };
+
+        let graph = &self.context.graph;
+        let edge_cost = |tail: NodeId, head_node: NodeId| -> Weight {
+            let start = graph.first_out[tail as usize] as usize;
+            let end = graph.first_out[tail as usize + 1] as usize;
+            for i in start..end {
+                if graph.head[i] == head_node {
+                    return graph.travel_time[i];
+                }
+            }
+            INFINITY
+        };
+
+        let candidates = multi.multi_query(
+            from,
+            to,
+            request_count,
+            stretch_factor,
+            path_geo_len,
+            edge_cost,
+        );
 
         let mut results: Vec<QueryAnswer> = Vec::with_capacity(max_alternatives);
         let mut shortest_geo_dist: Option<f64> = None;
@@ -281,7 +315,11 @@ impl<'a> QueryEngine<'a> {
                 shortest_geo_dist = Some(distance_m);
             }
 
-            let route_arc_ids = self.reconstruct_arc_ids(&alt.path).unwrap_or_default();
+            let route_arc_ids = match self.reconstruct_arc_ids(&alt.path) {
+                Some(ids) => ids,
+                None => continue,
+            };
+
             let weight_path_ids = route_arc_ids.clone();
 
             results.push(QueryAnswer {

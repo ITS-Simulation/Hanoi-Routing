@@ -1,5 +1,60 @@
 # CHANGELOGS.md
 
+## 2026-04-07 — retire standalone query UI scripts
+
+- **`scripts/query_ui.html`** (removed): Dropped the old standalone
+  single-route HTML tool now that the bundled `hanoi-server` frontend covers
+  the supported query workflow.
+- **`scripts/multi_query_ui.html`** (removed): Dropped the duplicate standalone
+  multi-route UI after merging that functionality into the current
+  `hanoi-server` frontend stack.
+- **`scripts/serve_query_ui.py`** (removed): Removed the local proxy/dev server
+  helper that only existed to support the retired standalone HTML UIs.
+
+## 2026-04-07 — hanoi-server map-first layout refinement
+
+- **`CCH-Hanoi/crates/hanoi-server/static/index.html`** (updated): Reworked
+  the bundled viewer into a more compact query workspace with Build / Routes /
+  Turns subviews, moved overlay controls into the sidebar, and added a
+  collapsible main panel toggle so the map can take over when needed.
+- **`CCH-Hanoi/crates/hanoi-server/static/app.js`** (updated): Added
+  persistent sidebar collapse state and query-subview state, wired the new
+  layout controls into the existing multi-route flow, and automatically switch
+  successful queries into the Routes view while keeping route logic unchanged.
+- **`CCH-Hanoi/crates/hanoi-server/static/styles.css`** (updated): Tightened
+  the sidebar and overlay layout for less scrolling, added compact map-first
+  responsive behavior, and constrained long route lists to scroll within their
+  own cards instead of stretching the whole panel.
+
+## 2026-04-07 — hanoi-server bundled multi-route query UI
+
+- **`CCH-Hanoi/crates/hanoi-server/static/index.html`** (updated): Added a
+  query-mode switch to the bundled viewer, alternatives/stretch controls, a
+  route-stack section, and legend updates so the bundled UI can drive both
+  single-route and multi-route queries without leaving the current frontend
+  stack.
+- **`CCH-Hanoi/crates/hanoi-server/static/app.js`** (updated): Merged the
+  standalone multi-query behavior into the bundled viewer state flow, including
+  multi-route request params, full FeatureCollection preservation, selectable
+  query-route cards, route-aware map styling, and selected-route summary /
+  maneuver rendering.
+- **`CCH-Hanoi/crates/hanoi-server/static/styles.css`** (updated): Added
+  styling for the new bundled multi-route controls, route-list cards, and
+  query-route map treatment using the existing hanoi-server visual language
+  rather than the older standalone script UI palette.
+
+## 2026-04-06 — latest origin-kientx merge walkthrough
+
+- **`docs/walkthrough/Merging latest origin-kientx updates into dev-haihm.md`**
+  (new): Reworked the latest `kientx` merge guide into a shorter,
+  step-focused walkthrough for the refactored `dev-haihm` branch. The doc keeps
+  the `git ls-tree` / `git show` audit trail, narrows the required merge to
+  `multi_route.rs`, `cch.rs`, and `line_graph.rs`, and shows the exact snippets
+  and paste targets to migrate while explicitly skipping refactored
+  `hanoi-server` and CLI files. Added a parity note for `cch.rs` so the guide
+  now calls out the one remaining behavioral choice versus `kientx`:
+  `reconstruct_arc_ids()` fallback vs skipping invalid candidates.
+
 ## 2026-04-06 — kientx cross-reference & merge guide
 
 - **`docs/walkthrough/Alternative Route Quality Investigation.md`** (updated):
