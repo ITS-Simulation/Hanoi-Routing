@@ -1,5 +1,66 @@
 # CHANGELOGS.md
 
+## 2026-04-08 �� documentation update: multi-route, Vietnamese translations
+
+- **`CCH-Hanoi/README.md`** (updated): Added K-alternative routes to system
+  overview, library API (§5.6), CLI usage (§8.1 --alternatives/--stretch),
+  HTTP API (§11.1 ?alternatives=N&stretch=F with multi-route response example),
+  testing guide (§13.6), performance table, and validation checklist.
+  Renumbered subsequent sections accordingly.
+- **`CCH-Hanoi/README_VI.md`** (new): Full Vietnamese translation of README.md
+  with natural phrasing and complete diacritics.
+- **`CCH-Hanoi/README_ALTERNATIVE.md`** (new): Copy of the updated
+  K-Alternative Routes walkthrough for the CCH-Hanoi workspace.
+- **`CCH-Hanoi/README_ALTERNATIVE_VI.md`** (new): Full Vietnamese translation
+  of the alternative routes walkthrough.
+- **`docs/walkthrough/K-Alternative Routes Implementation.md`** (updated):
+  Reworked to match actual implementation — renamed MultiRouteServer →
+  AlternativeServer, updated constants (BOUNDED_STRETCH_EPS 0.25→0.4,
+  LOCAL_OPT_T_FRACTION 0.25→0.4, LOCAL_OPT_EPSILON 0→0.1), added Phase 4
+  recursive decomposition, bounded stretch at deviation points, cost-based
+  sharing, and three new design decision entries.
+
+## 2026-04-07 — implement planned multi-route improvements
+
+- **`rust_road_router/engine/src/algo/customizable_contraction_hierarchy/query/alternative.rs`** (new):
+  Added the alternative-route query core from the reviewed plan, including
+  per-edge-cost path unpacking, travel-time prefiltering, bounded-stretch and
+  T-test checks, cost-based sharing, recursive subproblem stitching, and
+  debug/trace rejection logging.
+- **`rust_road_router/engine/src/algo/customizable_contraction_hierarchy/query.rs`**
+  (updated): Exported the new additive `alternative` query module.
+- **`rust_road_router/engine/Cargo.toml`** (updated): Added `tracing` for the
+  new alternative-query instrumentation.
+- **`CCH-Hanoi/crates/hanoi-core/src/multi_route.rs`** (updated): Reduced the
+  Hanoi-side module to the planned constants-and-re-exports shim.
+- **`CCH-Hanoi/crates/hanoi-core/src/cch.rs`** and
+  **`CCH-Hanoi/crates/hanoi-core/src/line_graph.rs`** (updated): Switched both
+  engines to `AlternativeServer::alternatives()`, removed the old ambiguous
+  `edge_cost` closure plumbing, and added info-level multi-route query
+  instrumentation on normal and line-graph entry points.
+- **Audit / fix note:** During the implementation audit, the recursive combine
+  phase was corrected to sort stitched left/right candidates by total distance
+  before admissibility checks so longer combinations cannot block shorter valid
+  ones by iteration order.
+
+## 2026-04-07 — multi-route improvements plan: 15 bug fixes (six rounds)
+
+- **`docs/planned/multi-route-improvements.md`** (updated): Resolved 15 bugs
+  across six review rounds. Round 1 (#1–5): P1 self-referential struct,
+  Q4/P2 geo-stretch gap, Q1 backward scan off-by-one, Q3 stitch duplicate
+  v_s, edge_cost parallel arc ambiguity. Round 2 (#6–9): P1 sibling borrow
+  unworkable, retain() geo-stretch too late, AlternativeRoute.edge_costs
+  undeclared, R1 stale header + signatures. Round 3 (#10–11): Q3 edge-cost
+  stitch incorrectly mirrored node dedup onto edges, run_basic_selection
+  undefined + accepted[0] unguarded. Round 4 (#12–13): Q1
+  find_deviation_points missing len<2 guard + unused reference_costs param,
+  R1 AlternativeRoute geo_distance_m omission clarified. Round 5 (#14): R1
+  adapter contradictorily re-exported AlternativeRoute while claiming
+  hanoi-core keeps its own version — resolved by dropping geo_distance_m
+  from both types. Round 6 (#15): R1 adapter described as "thin wrapper"
+  providing closures but was actually just constants — clarified as
+  constants+re-exports shim with callers calling AlternativeServer directly.
+
 ## 2026-04-07 — retire standalone query UI scripts
 
 - **`scripts/query_ui.html`** (removed): Dropped the old standalone

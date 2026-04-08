@@ -41,6 +41,7 @@ algorithms) and provides:
 - **HTTP server** with dual-port architecture (query + customization)
 - **API gateway** for unified access to both graph modes
 - **Performance benchmarking** with statistical analysis and regression detection
+- **K-alternative routes** via separator-based elimination tree walk
 
 ### Two Routing Modes
 
@@ -374,7 +375,55 @@ distance (the CCH distance covers arriving at the target segment but not
 traversing it)
 - Output format is identical to normal mode: intersection node IDs + coordinates
 
-### 5.6 SpatialIndex — Coordinate Snapping
+### 5.6 K-Alternative Routes
+
+Both `QueryEngine` and `LineGraphQueryEngine` support multi-route queries via
+the `multi_query` / `multi_query_coords` methods. These produce up to K diverse
+alternative routes using separator-based via-vertex candidates from the CCH
+elimination tree.
+
+```rust
+// Normal graph — by node IDs
+let alternatives = engine.multi_query(from, to, 3, 1.25);
+for (i, answer) in alternatives.iter().enumerate() {
+    println!("Route {}: {} ms, {:.0} m", i, answer.distance_ms, answer.distance_m);
+}
+
+// Normal graph — by coordinates
+let alternatives = engine.multi_query_coords(
+    (21.028, 105.834), (21.006, 105.843),
+    3,    // max_alternatives
+    1.25, // stretch_factor (geographic)
+)?;
+
+// Line graph — same interface
+let alternatives = lg_engine.multi_query(source_edge, target_edge, 3, 1.25);
+let alternatives = lg_engine.multi_query_coords(
+    (21.028, 105.834), (21.006, 105.843), 3, 1.25,
+)?;
+```
+
+**Parameters**:
+
+| Parameter          | Type    | Description                                                  |
+| ------------------ | ------- | ------------------------------------------------------------ |
+| `max_alternatives` | `usize` | Maximum number of routes to return (including shortest path) |
+| `stretch_factor`   | `f64`   | Max geographic detour ratio (e.g. 1.25 = 25% longer)        |
+
+**Return**: `Vec<QueryAnswer>` — route index 0 is always the shortest path.
+Each answer includes full path, coordinates, arc IDs, and distance.
+
+**Filtering pipeline** (per candidate):
+1. Loop detection — reject paths visiting any node twice
+2. Geographic bounded stretch — reject if geo distance > shortest × stretch
+3. Bounded stretch test — detour segment A→B must be ≤ optimal(A→B) × (1 + ε)
+4. Cost sharing — reject if >80% cost overlap with any accepted route
+5. Local optimality (T-test) — subpath around via-node must be near-optimal
+6. Recursive decomposition — splits at highest-rank separator for more diversity
+
+See [README_ALTERNATIVE.md](README_ALTERNATIVE.md) for full algorithm details.
+
+### 5.7 SpatialIndex — Coordinate Snapping
 
 ```rust
 use hanoi_core::SpatialIndex;
@@ -396,7 +445,7 @@ let validated = spatial.validated_snap("source", 21.028, 105.834, &config)?;
 **Algorithm**: Hybrid KD-tree (k=10 nearest nodes) + Haversine perpendicular
 distance to all outgoing edges of those nodes.
 
-### 5.7 BoundingBox and Coordinate Validation
+### 5.8 BoundingBox and Coordinate Validation
 
 ```rust
 use hanoi_core::{BoundingBox, ValidationConfig, CoordRejection};
@@ -420,7 +469,7 @@ validate_coordinate("source", 21.028, 105.834, &bbox, &config)?;
 - `OutOfBounds` — outside padded graph bounding box
 - `SnapTooFar` — nearest edge is further than `max_snap_distance_m`
 
-### 5.8 QueryAnswer — Result Type
+### 5.9 QueryAnswer — Result Type
 
 ```rust
 pub struct QueryAnswer {
@@ -721,6 +770,33 @@ cch-hanoi query \
   --from-lat 21.028 --from-lng 105.834 \
   --to-lat 21.006 --to-lng 105.843
 ```
+
+**Alternative routes**:
+
+```bash
+# Request 3 alternative routes with 25% stretch
+cch-hanoi query \
+  --data-dir Maps/data/hanoi_car \
+  --from-lat 21.028 --from-lng 105.834 \
+  --to-lat 21.006 --to-lng 105.843 \
+  --alternatives 3 --stretch 1.25
+
+# Line graph mode with alternatives
+cch-hanoi query \
+  --data-dir Maps/data/hanoi_car \
+  --line-graph \
+  --from-lat 21.028 --from-lng 105.834 \
+  --to-lat 21.006 --to-lng 105.843 \
+  --alternatives 5
+```
+
+| Argument         | Default | Description                                       |
+| ---------------- | ------- | ------------------------------------------------- |
+| `--alternatives` | `0`     | Number of alternative routes (0 = single path)    |
+| `--stretch`      | `1.25`  | Max geographic stretch factor for alternatives    |
+
+When `--alternatives > 0`, the output contains multiple features (GeoJSON) or
+an array of route objects (JSON). Route index 0 is always the shortest path.
 
 **Output formatting and file options**:
 
@@ -1090,6 +1166,60 @@ bench_report --baseline run1.json --current run2.json
 {
   "from_node": 1000,
   "to_node": 5000
+}
+```
+
+**Request (alternative routes)** — via query parameters:
+
+`POST /query?alternatives=3&stretch=1.25`
+
+```json
+{
+  "from_lat": 21.028,
+  "from_lng": 105.834,
+  "to_lat": 21.006,
+  "to_lng": 105.843
+}
+```
+
+| Query Param    | Default | Description                                    |
+| -------------- | ------- | ---------------------------------------------- |
+| `alternatives` | `0`     | Number of routes (0 = single shortest path)    |
+| `stretch`      | `1.25`  | Max geographic stretch factor for alternatives |
+
+When `alternatives > 0`, the response is a GeoJSON FeatureCollection with one
+Feature per route (or a JSON array when `?format=json`). Each feature includes
+`route_index` in its properties — index 0 is always the shortest path.
+
+**Response (multi-route GeoJSON)** — `POST /query?alternatives=3&colors`:
+
+```json
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [...] },
+      "properties": {
+        "route_index": 0,
+        "distance_ms": 142300,
+        "distance_m": 3842.7,
+        "stroke": "#e6194b",
+        "stroke-width": 5
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [...] },
+      "properties": {
+        "route_index": 1,
+        "distance_ms": 158700,
+        "distance_m": 4210.3,
+        "stroke": "#3cb44b",
+        "stroke-width": 3
+      }
+    }
+  ]
 }
 ```
 
@@ -1608,7 +1738,58 @@ curl -s "http://localhost:50051/info?profile=car" | python3 -m json.tool
 curl -s "http://localhost:50051/info?profile=motorcycle" | python3 -m json.tool
 ```
 
-### 13.6 Testing Response Formats
+### 13.6 Testing Alternative Routes
+
+**CLI**:
+
+```bash
+# Normal mode — 3 alternatives
+cch-hanoi query \
+  --data-dir Maps/data/hanoi_car \
+  --from-lat 21.028 --from-lng 105.834 \
+  --to-lat 21.006 --to-lng 105.843 \
+  --alternatives 3
+
+# Line graph mode — 5 alternatives with custom stretch
+cch-hanoi query \
+  --data-dir Maps/data/hanoi_car \
+  --line-graph \
+  --from-lat 21.028 --from-lng 105.834 \
+  --to-lat 21.006 --to-lng 105.843 \
+  --alternatives 5 --stretch 1.4
+```
+
+**Server**:
+
+```bash
+# Multi-route GeoJSON with colors
+curl -s -X POST "http://localhost:8080/query?alternatives=3&colors" \
+  -H "Content-Type: application/json" \
+  -d '{"from_lat": 21.028, "from_lng": 105.834, "to_lat": 21.006, "to_lng": 105.843}' \
+  | python3 -m json.tool
+
+# Multi-route JSON format
+curl -s -X POST "http://localhost:8080/query?alternatives=3&format=json" \
+  -H "Content-Type: application/json" \
+  -d '{"from_lat": 21.028, "from_lng": 105.834, "to_lat": 21.006, "to_lng": 105.843}' \
+  | python3 -m json.tool
+
+# Via gateway
+curl -s -X POST "http://localhost:50051/query?profile=car&alternatives=3&colors" \
+  -H "Content-Type: application/json" \
+  -d '{"from_lat": 21.028, "from_lng": 105.834, "to_lat": 21.006, "to_lng": 105.843}' \
+  | python3 -m json.tool
+```
+
+**What to verify**:
+
+- Response has multiple features (GeoJSON) or array elements (JSON)
+- `route_index` 0 is the shortest distance
+- Each route has distinct coordinates (alternatives are geometrically diverse)
+- With `?colors`, each route has a different `stroke` color
+- All routes are within the geographic stretch limit
+
+### 13.7 Testing Response Formats
 
 ```bash
 # Default response is GeoJSON (no query param needed)
@@ -1640,7 +1821,7 @@ curl -s -X POST "http://localhost:8080/query?colors" \
 (RFC 7946). `?format=json` returns flat `distance_ms`/`coordinates` fields.
 `?colors` adds `stroke`, `stroke-width`, `fill`, `fill-opacity` to GeoJSON properties.
 
-### 13.7 Testing Error Cases
+### 13.8 Testing Error Cases
 
 ```bash
 # Invalid coordinates (out of range)
@@ -1667,7 +1848,7 @@ curl -s -X POST "http://localhost:50051/query?profile=unknown" \
 # → 400 with unknown profile error and available_profiles list
 ```
 
-### 13.8 Performance Benchmarks During Testing
+### 13.9 Performance Benchmarks During Testing
 
 ```bash
 # Core benchmarks (no server)
@@ -1689,7 +1870,7 @@ bench_core --graph-dir Maps/data/hanoi_car/graph --output current.json
 bench_report --baseline baseline.json --current current.json --threshold 10
 ```
 
-### 13.9 Validation Checklist
+### 13.10 Validation Checklist
 
 
 | Check                                 | Command / Method                                                          | Expected                   |
@@ -1704,6 +1885,7 @@ bench_report --baseline baseline.json --current current.json --threshold 10
 | Re-customization works                | Upload multiple weight sets                                               | Different results per set  |
 | Coordinate validation rejects invalid | `curl` with bad coords                                                    | 400 error                  |
 | Weight validation rejects INFINITY    | Upload weights with >= 2^31/2                                             | 400 error                  |
+| Multi-route returns alternatives       | `curl POST /query?alternatives=3`                                         | Multiple features returned |
 | Gateway routes correctly              | `curl POST /query?profile=car`                                            | Routes to correct backend  |
 | GeoJSON format correct (default)      | `curl POST /query` (no query param)                                       | Valid GeoJSON Feature      |
 | JSON format via query param           | `curl POST /query?format=json`                                            | Flat JSON response         |
@@ -2121,6 +2303,7 @@ curl -s http://localhost:8080/info   | python3 -m json.tool
 | CCH build (Phase 1)     | 2–10s        | 5–20s      | CPU bound, one-time |
 | Customization (Phase 2) | 50–200ms     | 100–500ms  | Per weight update   |
 | Query (Phase 3)         | < 1ms        | < 2ms      | Per query           |
+| Multi-route (K=3)       | 5–50ms       | 10–100ms   | Per query           |
 | KD-tree build           | < 1s         | < 2s       | One-time            |
 | Snap-to-edge            | < 0.1ms      | < 0.1ms    | Per coordinate      |
 

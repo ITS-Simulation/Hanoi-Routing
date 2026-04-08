@@ -1,18 +1,18 @@
 use std::path::Path;
 
-use rust_road_router::algo::customizable_contraction_hierarchy::CustomizedBasic;
 use rust_road_router::algo::customizable_contraction_hierarchy::query::Server as CchQueryServer;
-use rust_road_router::algo::customizable_contraction_hierarchy::{CCH, customize};
+use rust_road_router::algo::customizable_contraction_hierarchy::CustomizedBasic;
+use rust_road_router::algo::customizable_contraction_hierarchy::{customize, CCH};
 use rust_road_router::algo::{Query, QueryServer};
-use rust_road_router::datastr::graph::{FirstOutGraph, INFINITY, NodeId, Weight};
+use rust_road_router::datastr::graph::{FirstOutGraph, NodeId, Weight, INFINITY};
 use rust_road_router::datastr::node_order::NodeOrder;
 use rust_road_router::io::Load;
 
 use crate::bounds::{BoundingBox, CoordRejection, ValidationConfig};
 use crate::geometry::TurnAnnotation;
-use crate::multi_route::{GEO_OVER_REQUEST, MAX_GEO_RATIO, MultiRouteServer};
 use crate::graph::GraphData;
-use crate::spatial::{SNAP_MAX_CANDIDATES, SpatialIndex};
+use crate::multi_route::{AlternativeServer, GEO_OVER_REQUEST, MAX_GEO_RATIO};
+use crate::spatial::{SpatialIndex, SNAP_MAX_CANDIDATES};
 
 /// Answer from a shortest-path query.
 pub struct QueryAnswer {
@@ -235,7 +235,7 @@ impl<'a> QueryEngine<'a> {
     }
 
     /// Find up to `max_alternatives` alternative routes by node IDs.
-    /// TODO: Consider add tracing for logging
+    #[tracing::instrument(skip(self), fields(from, to, max_alternatives, stretch_factor))]
     pub fn multi_query(
         &mut self,
         from: NodeId,
@@ -244,10 +244,10 @@ impl<'a> QueryEngine<'a> {
         stretch_factor: f64,
     ) -> Vec<QueryAnswer> {
         let customized = self.server.customized();
-        let mut multi = MultiRouteServer::new(customized);
+        let mut multi = AlternativeServer::new(customized);
         let request_count = max_alternatives
             .saturating_mul(GEO_OVER_REQUEST)
-            .max(max_alternatives + 10);
+            .max(max_alternatives + 12);
         let lat = &self.context.graph.latitude;
         let lng = &self.context.graph.longitude;
         let path_geo_len = |path: &[NodeId]| -> f64 {
@@ -262,27 +262,7 @@ impl<'a> QueryEngine<'a> {
                 })
                 .sum()
         };
-
-        let graph = &self.context.graph;
-        let edge_cost = |tail: NodeId, head_node: NodeId| -> Weight {
-            let start = graph.first_out[tail as usize] as usize;
-            let end = graph.first_out[tail as usize + 1] as usize;
-            for i in start..end {
-                if graph.head[i] == head_node {
-                    return graph.travel_time[i];
-                }
-            }
-            INFINITY
-        };
-
-        let candidates = multi.multi_query(
-            from,
-            to,
-            request_count,
-            stretch_factor,
-            path_geo_len,
-            edge_cost,
-        );
+        let candidates = multi.alternatives(from, to, request_count, stretch_factor, path_geo_len);
 
         let mut results: Vec<QueryAnswer> = Vec::with_capacity(max_alternatives);
         let mut shortest_geo_dist: Option<f64> = None;
@@ -335,11 +315,25 @@ impl<'a> QueryEngine<'a> {
             });
         }
 
+        tracing::info!(
+            requested = max_alternatives,
+            returned = results.len(),
+            shortest_ms = results.first().map(|route| route.distance_ms),
+            "multi_query completed"
+        );
+
         results
     }
 
     /// Find up to `max_alternatives` alternative routes by coordinates.
-    /// TODO: Consider add tracing for logging
+    #[tracing::instrument(skip(self), fields(
+        from_lat = from.0,
+        from_lng = from.1,
+        to_lat = to.0,
+        to_lng = to.1,
+        max_alternatives,
+        stretch_factor
+    ))]
     pub fn multi_query_coords(
         &mut self,
         from: (f32, f32),
@@ -375,11 +369,22 @@ impl<'a> QueryEngine<'a> {
                         .into_iter()
                         .map(|a| Self::patch_coordinates(a, from, to))
                         .collect();
+                    tracing::info!(
+                        requested = max_alternatives,
+                        returned = patched.len(),
+                        shortest_ms = patched.first().map(|route| route.distance_ms),
+                        "multi_query_coords completed"
+                    );
                     return Ok(patched);
                 }
             }
         }
 
+        tracing::info!(
+            requested = max_alternatives,
+            returned = 0usize,
+            "multi_query_coords completed"
+        );
         Ok(Vec::new())
     }
 

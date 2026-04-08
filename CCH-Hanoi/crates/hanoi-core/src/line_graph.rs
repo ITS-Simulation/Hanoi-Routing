@@ -1,21 +1,21 @@
 use std::path::Path;
 
-use rust_road_router::algo::customizable_contraction_hierarchy::CustomizedBasic;
 use rust_road_router::algo::customizable_contraction_hierarchy::query::Server as CchQueryServer;
+use rust_road_router::algo::customizable_contraction_hierarchy::CustomizedBasic;
 use rust_road_router::algo::customizable_contraction_hierarchy::{
-    CCH, DirectedCCH, customize_directed,
+    customize_directed, DirectedCCH, CCH,
 };
 use rust_road_router::algo::{Query, QueryServer};
-use rust_road_router::datastr::graph::{EdgeId, FirstOutGraph, INFINITY, NodeId, Weight};
+use rust_road_router::datastr::graph::{EdgeId, FirstOutGraph, NodeId, Weight, INFINITY};
 use rust_road_router::datastr::node_order::NodeOrder;
 use rust_road_router::io::Load;
 
 use crate::bounds::{BoundingBox, CoordRejection, ValidationConfig};
-use crate::cch::{QueryAnswer, route_distance_m};
-use crate::multi_route::{GEO_OVER_REQUEST, MAX_GEO_RATIO, MultiRouteServer};
+use crate::cch::{route_distance_m, QueryAnswer};
 use crate::geometry::{compute_turns, refine_turns};
 use crate::graph::GraphData;
-use crate::spatial::{SNAP_MAX_CANDIDATES, SpatialIndex};
+use crate::multi_route::{AlternativeServer, GEO_OVER_REQUEST, MAX_GEO_RATIO};
+use crate::spatial::{SpatialIndex, SNAP_MAX_CANDIDATES};
 
 /// CCH context for line graphs. Uses `DirectedCCH` (pruned — no always-INFINITY
 /// edges) for efficient turn-expanded graph routing.
@@ -487,7 +487,7 @@ impl<'a> LineGraphQueryEngine<'a> {
                 }
             }
         }
-        
+
         Ok(best.map(|answer| Self::patch_coordinates(answer, from, to)))
     }
 
@@ -580,6 +580,10 @@ impl<'a> LineGraphQueryEngine<'a> {
     /// Find up to `max_alternatives` alternative routes by line-graph node IDs
     /// (= original edge indices). Each route gets source-edge correction,
     /// LG->original node mapping, and turn annotation.
+    #[tracing::instrument(
+        skip(self),
+        fields(source_edge, target_edge, max_alternatives, stretch_factor)
+    )]
     pub fn multi_query(
         &self,
         source_edge: EdgeId,
@@ -588,31 +592,17 @@ impl<'a> LineGraphQueryEngine<'a> {
         stretch_factor: f64,
     ) -> Vec<QueryAnswer> {
         let customized = self.server.customized();
-        let mut multi = MultiRouteServer::new(customized);
+        let mut multi = AlternativeServer::new(customized);
         let request_count = max_alternatives
             .saturating_mul(GEO_OVER_REQUEST)
             .max(max_alternatives + 10);
         let geo_len = self.lg_path_geo_len();
-
-        let lg_graph = &self.context.graph;
-        let edge_cost = |tail: NodeId, head_node: NodeId| -> Weight {
-            let start = lg_graph.first_out[tail as usize] as usize;
-            let end = lg_graph.first_out[tail as usize + 1] as usize;
-            for i in start..end {
-                if lg_graph.head[i] == head_node {
-                    return lg_graph.travel_time[i];
-                }
-            }
-            INFINITY
-        };
-
-        let candidates = multi.multi_query(
+        let candidates = multi.alternatives(
             source_edge as NodeId,
             target_edge as NodeId,
             request_count,
             stretch_factor,
             geo_len,
-            edge_cost,
         );
 
         let source_edge_cost = self.context.original_travel_time[source_edge as usize];
@@ -638,12 +628,27 @@ impl<'a> LineGraphQueryEngine<'a> {
             }
         }
 
+        tracing::info!(
+            requested = max_alternatives,
+            returned = results.len(),
+            shortest_ms = results.first().map(|route| route.distance_ms),
+            "line_graph multi_query completed"
+        );
+
         results
     }
 
     /// Find up to `max_alternatives` alternative routes by coordinates.
     /// Snaps in the original graph coordinate space, then runs multi_query on
     /// the snapped edge IDs with trimming.
+    #[tracing::instrument(skip(self), fields(
+        from_lat = from.0,
+        from_lng = from.1,
+        to_lat = to.0,
+        to_lng = to.1,
+        max_alternatives,
+        stretch_factor
+    ))]
     pub fn multi_query_coords(
         &self,
         from: (f32, f32),
@@ -669,31 +674,17 @@ impl<'a> LineGraphQueryEngine<'a> {
         for src in &src_snaps {
             for dst in &dst_snaps {
                 let customized = self.server.customized();
-                let mut multi = MultiRouteServer::new(customized);
+                let mut multi = AlternativeServer::new(customized);
                 let request_count = max_alternatives
                     .saturating_mul(GEO_OVER_REQUEST)
                     .max(max_alternatives + 10);
                 let geo_len = self.lg_path_geo_len();
-
-                let lg_graph = &self.context.graph;
-                let edge_cost = |tail: NodeId, head_node: NodeId| -> Weight {
-                    let start = lg_graph.first_out[tail as usize] as usize;
-                    let end = lg_graph.first_out[tail as usize + 1] as usize;
-                    for i in start..end {
-                        if lg_graph.head[i] == head_node {
-                            return lg_graph.travel_time[i];
-                        }
-                    }
-                    INFINITY
-                };
-
-                let candidates = multi.multi_query(
+                let candidates = multi.alternatives(
                     src.edge_id as NodeId,
                     dst.edge_id as NodeId,
                     request_count,
                     stretch_factor,
                     geo_len,
-                    edge_cost,
                 );
 
                 if candidates.is_empty() {
@@ -728,11 +719,22 @@ impl<'a> LineGraphQueryEngine<'a> {
                 }
 
                 if !answers.is_empty() {
+                    tracing::info!(
+                        requested = max_alternatives,
+                        returned = answers.len(),
+                        shortest_ms = answers.first().map(|route| route.distance_ms),
+                        "line_graph multi_query_coords completed"
+                    );
                     return Ok(answers);
                 }
             }
         }
 
+        tracing::info!(
+            requested = max_alternatives,
+            returned = 0usize,
+            "line_graph multi_query_coords completed"
+        );
         Ok(Vec::new())
     }
 
