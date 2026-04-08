@@ -3,3 +3,5 @@
 .claude/
 testing/
 .codex
+.idea/
+*.log
