@@ -35,6 +35,7 @@ struct CliArgs{
 struct GeneratedGraph{
 	std::vector<unsigned>first_out;
 	std::vector<unsigned>head;
+	std::vector<unsigned>first_modelling_node;
 	std::vector<unsigned>way;
 	std::vector<uint64_t>way_osm_id;
 	std::vector<std::string>way_name;
@@ -45,6 +46,8 @@ struct GeneratedGraph{
 	std::vector<unsigned>geo_distance;
 	std::vector<float>latitude;
 	std::vector<float>longitude;
+	std::vector<float>modelling_node_latitude;
+	std::vector<float>modelling_node_longitude;
 	std::vector<unsigned>forbidden_turn_from_arc;
 	std::vector<unsigned>forbidden_turn_to_arc;
 };
@@ -247,7 +250,7 @@ GeneratedGraph load_graph(const CliArgs&args){
 		},
 		log_fn,
 		true,
-		RoutingKit::OSMRoadGeometry::none
+		RoutingKit::OSMRoadGeometry::uncompressed
 	);
 
 	mapping = RoutingKit::OSMRoutingIDMapping(); // release memory
@@ -283,6 +286,7 @@ GeneratedGraph load_graph(const CliArgs&args){
 
 	out.first_out = std::move(routing_graph.first_out);
 	out.head = std::move(routing_graph.head);
+	out.first_modelling_node = std::move(routing_graph.first_modelling_node);
 	out.way = std::move(routing_graph.way);
 	out.way_osm_id = std::move(way_osm_id);
 	out.way_name = std::move(way_name);
@@ -291,6 +295,8 @@ GeneratedGraph load_graph(const CliArgs&args){
 	out.geo_distance = std::move(routing_graph.geo_distance);
 	out.latitude = std::move(routing_graph.latitude);
 	out.longitude = std::move(routing_graph.longitude);
+	out.modelling_node_latitude = std::move(routing_graph.modelling_node_latitude);
+	out.modelling_node_longitude = std::move(routing_graph.modelling_node_longitude);
 	out.forbidden_turn_from_arc = std::move(routing_graph.forbidden_turn_from_arc);
 	out.forbidden_turn_to_arc = std::move(routing_graph.forbidden_turn_to_arc);
 	return out;
@@ -407,12 +413,15 @@ void save_road_arc_manifest(const std::filesystem::path&output_dir, const Genera
 void save_graph(const std::filesystem::path&output_dir, const GeneratedGraph&graph){
 	save_named_vector(output_dir, "first_out", graph.first_out);
 	save_named_vector(output_dir, "head", graph.head);
+	save_named_vector(output_dir, "first_modelling_node", graph.first_modelling_node);
 	save_named_vector(output_dir, "way", graph.way);
 	save_named_vector(output_dir, "is_arc_roundabout", graph.is_arc_roundabout);
 	save_named_vector(output_dir, "travel_time", graph.travel_time);
 	save_named_vector(output_dir, "geo_distance", graph.geo_distance);
 	save_named_vector(output_dir, "latitude", graph.latitude);
 	save_named_vector(output_dir, "longitude", graph.longitude);
+	save_named_vector(output_dir, "modelling_node_latitude", graph.modelling_node_latitude);
+	save_named_vector(output_dir, "modelling_node_longitude", graph.modelling_node_longitude);
 	save_named_vector(output_dir, "forbidden_turn_from_arc", graph.forbidden_turn_from_arc);
 	save_named_vector(output_dir, "forbidden_turn_to_arc", graph.forbidden_turn_to_arc);
 }

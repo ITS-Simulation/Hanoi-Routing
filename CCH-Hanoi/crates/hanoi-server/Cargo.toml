@@ -20,6 +20,7 @@ tracing-appender = "0.2"
 tracing-tree = "0.4"
 arrow = "58.1.0"
 serde_yaml = { package = "yaml_serde", version = "0.10" }
+flume = "0.12.0"
 
 [[bin]]
 name = "hanoi_server"

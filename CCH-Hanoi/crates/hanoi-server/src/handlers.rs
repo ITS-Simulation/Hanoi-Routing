@@ -29,7 +29,9 @@ pub async fn handle_query(
         format: params.format,
         colors: params.colors.is_some(),
         alternatives: params.alternatives.unwrap_or(0),
-        stretch: params.stretch.unwrap_or(hanoi_core::multi_route::DEFAULT_STRETCH),
+        stretch: params
+            .stretch
+            .unwrap_or(hanoi_core::multi_route::DEFAULT_STRETCH),
         reply: tx,
     };
 
@@ -93,7 +95,7 @@ pub async fn handle_evaluate_routes(
     let using_customized_weights = latest_weights.is_some();
     let effective_weights = latest_weights
         .as_deref()
-        .unwrap_or(state.baseline_weights.as_ref());
+        .unwrap_or_else(|| state.baseline_weights.as_ref().as_ref());
     let routes = state
         .route_evaluator
         .evaluate_routes(&req.routes, effective_weights);
@@ -185,7 +187,7 @@ pub async fn handle_reset_weights(
 
     state
         .watch_tx
-        .send(Some((*state.baseline_weights).clone()))
+        .send(Some(state.baseline_weights.as_ref().to_vec()))
         .map_err(|_| {
             (
                 StatusCode::SERVICE_UNAVAILABLE,

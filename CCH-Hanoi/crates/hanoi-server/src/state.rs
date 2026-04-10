@@ -5,6 +5,7 @@ use tokio::sync::{mpsc, watch};
 
 use hanoi_core::CoordRejection;
 use rust_road_router::datastr::graph::Weight;
+use rust_road_router::util::Storage;
 
 use crate::camera_overlay::CameraOverlay;
 use crate::route_eval::RouteEvaluator;
@@ -32,7 +33,7 @@ pub struct AppState {
     /// Watch channel to send weight-update vectors to the customization loop.
     pub watch_tx: watch::Sender<Option<Vec<Weight>>>,
     /// Baseline weight vector for the currently loaded graph.
-    pub baseline_weights: Arc<Vec<Weight>>,
+    pub baseline_weights: Arc<Storage<Weight>>,
     /// Latest accepted customization weights for read-only HTTP inspection.
     pub latest_weights: Arc<RwLock<Option<Vec<Weight>>>>,
     /// Number of edges in the loaded graph (for body-size validation).

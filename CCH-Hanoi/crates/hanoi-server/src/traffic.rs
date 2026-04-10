@@ -129,7 +129,7 @@ impl TrafficOverlay {
         }
 
         let mut incoming_counts = vec![0u32; original_edge_count];
-        for &target in &context.graph.head {
+        for &target in context.graph.head.iter() {
             let target = target as usize;
             if target < original_edge_count {
                 incoming_counts[target] += 1;

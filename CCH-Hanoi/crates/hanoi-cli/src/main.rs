@@ -244,7 +244,8 @@ fn init_tracing(log_format: &LogFormat, log_file: Option<&PathBuf>) -> Option<Wo
 
 /// Color palette for multi-route GeoJSON visualization.
 const ROUTE_COLORS: &[&str] = &[
-    "#ff5500", "#0055ff", "#00aa44", "#aa00cc", "#cc8800", "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
+    "#ff5500", "#0055ff", "#00aa44", "#aa00cc", "#cc8800", "#e6194b", "#3cb44b", "#4363d8",
+    "#f58231", "#911eb4",
 ];
 
 /// Format multiple route answers as a GeoJSON FeatureCollection or JSON array.
@@ -259,7 +260,8 @@ fn format_multi_result(
                 .iter()
                 .enumerate()
                 .map(|(idx, a)| {
-                    let coords: Vec<[f32; 2]> = a.coordinates.iter().map(|&(lat, lng)| [lng, lat]).collect();
+                    let coords: Vec<[f32; 2]> =
+                        a.coordinates.iter().map(|&(lat, lng)| [lng, lat]).collect();
                     let mut props = serde_json::json!({
                         "distance_ms": a.distance_ms,
                         "distance_m": a.distance_m,
@@ -269,7 +271,10 @@ fn format_multi_result(
                         let obj = props.as_object_mut().unwrap();
                         let color = ROUTE_COLORS[idx % ROUTE_COLORS.len()];
                         obj.insert("stroke".into(), serde_json::json!(color));
-                        obj.insert("stroke-width".into(), serde_json::json!(if idx == 0 { 10 } else { 6 }));
+                        obj.insert(
+                            "stroke-width".into(),
+                            serde_json::json!(if idx == 0 { 10 } else { 6 }),
+                        );
                         obj.insert("fill".into(), serde_json::json!(color));
                         obj.insert("fill-opacity".into(), serde_json::json!(0.3));
                     }
@@ -333,13 +338,20 @@ fn run_multi_query(
         tracing::info!(elapsed = ?t0.elapsed(), "DirectedCCH built");
 
         let t1 = Instant::now();
-        let engine = LineGraphQueryEngine::new(&context);
+        let mut engine = LineGraphQueryEngine::new(&context);
         tracing::info!(elapsed = ?t1.elapsed(), "initial customization + spatial index");
 
         if let (Some(from), Some(to)) = (from_node, to_node) {
             engine.multi_query(from, to, alternatives as usize, stretch)
-        } else if let (Some(flat), Some(flng), Some(tlat), Some(tlng)) = (from_lat, from_lng, to_lat, to_lng) {
-            match engine.multi_query_coords((flat, flng), (tlat, tlng), alternatives as usize, stretch) {
+        } else if let (Some(flat), Some(flng), Some(tlat), Some(tlng)) =
+            (from_lat, from_lng, to_lat, to_lng)
+        {
+            match engine.multi_query_coords(
+                (flat, flng),
+                (tlat, tlng),
+                alternatives as usize,
+                stretch,
+            ) {
                 Ok(answers) => answers,
                 Err(rejection) => {
                     tracing::error!(%rejection, "coordinate validation failed");
@@ -356,7 +368,8 @@ fn run_multi_query(
 
         tracing::info!(?graph_dir, "loading graph");
         let t0 = Instant::now();
-        let context = CchContext::load_and_build(&graph_dir, &perm_path).expect("failed to load graph");
+        let context =
+            CchContext::load_and_build(&graph_dir, &perm_path).expect("failed to load graph");
         tracing::info!(elapsed = ?t0.elapsed(), "CCH built");
 
         let t1 = Instant::now();
@@ -365,8 +378,15 @@ fn run_multi_query(
 
         if let (Some(from), Some(to)) = (from_node, to_node) {
             engine.multi_query(from, to, alternatives as usize, stretch)
-        } else if let (Some(flat), Some(flng), Some(tlat), Some(tlng)) = (from_lat, from_lng, to_lat, to_lng) {
-            match engine.multi_query_coords((flat, flng), (tlat, tlng), alternatives as usize, stretch) {
+        } else if let (Some(flat), Some(flng), Some(tlat), Some(tlng)) =
+            (from_lat, from_lng, to_lat, to_lng)
+        {
+            match engine.multi_query_coords(
+                (flat, flng),
+                (tlat, tlng),
+                alternatives as usize,
+                stretch,
+            ) {
                 Ok(answers) => answers,
                 Err(rejection) => {
                     tracing::error!(%rejection, "coordinate validation failed");
@@ -429,7 +449,7 @@ fn main() {
             output_format,
             demo,
             alternatives,
-            stretch
+            stretch,
         } => {
             if alternatives > 0 {
                 run_multi_query(
@@ -536,12 +556,12 @@ fn main() {
                         match std::fs::write(&path, format!("{}\n", output_str)) {
                             Ok(_) => {
                                 tracing::info!(
-                                distance_ms = a.distance_ms,
-                                distance_m = format!("{:.1}", a.distance_m).as_str(),
-                                path_nodes = a.path.len(),
-                                output = %path.display(),
-                                "query result"
-                            );
+                                    distance_ms = a.distance_ms,
+                                    distance_m = format!("{:.1}", a.distance_m).as_str(),
+                                    path_nodes = a.path.len(),
+                                    output = %path.display(),
+                                    "query result"
+                                );
                             }
                             Err(e) => {
                                 tracing::error!(?path, error = %e, "failed to write output file");
