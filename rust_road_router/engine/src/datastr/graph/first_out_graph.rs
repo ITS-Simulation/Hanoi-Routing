@@ -571,9 +571,54 @@ impl Reconstruct for UnweightedOwnedGraph {
 }
 
 pub struct ReversedGraphWithEdgeIds {
-    first_out: Vec<EdgeId>,
-    head: Vec<NodeId>,
-    edge_ids: Vec<EdgeId>,
+    first_out: Storage<EdgeId>,
+    head: Storage<NodeId>,
+    edge_ids: Storage<EdgeId>,
+}
+
+impl ReversedGraphWithEdgeIds {
+    pub fn first_out(&self) -> &[EdgeId] {
+        self.first_out.as_slice()
+    }
+
+    pub fn head_slice(&self) -> &[NodeId] {
+        self.head.as_slice()
+    }
+
+    pub fn edge_ids(&self) -> &[EdgeId] {
+        self.edge_ids.as_slice()
+    }
+
+    pub fn from_raw_validated(first_out: Vec<EdgeId>, head: Vec<NodeId>, edge_ids: Vec<EdgeId>) -> std::io::Result<Self> {
+        Self::from_storage_validated(Storage::from_vec(first_out), Storage::from_vec(head), Storage::from_vec(edge_ids))
+    }
+
+    pub fn from_storage_validated(first_out: Storage<EdgeId>, head: Storage<NodeId>, edge_ids: Storage<EdgeId>) -> std::io::Result<Self> {
+        let check = |cond: bool, msg: &str| -> std::io::Result<()> {
+            if cond {
+                Ok(())
+            } else {
+                Err(std::io::Error::new(std::io::ErrorKind::InvalidData, msg.to_string()))
+            }
+        };
+
+        let first_out_slice = first_out.as_slice();
+        let head_slice = head.as_slice();
+        let edge_ids_slice = edge_ids.as_slice();
+
+        check(!first_out_slice.is_empty(), "inverted first_out must be non-empty")?;
+        check(*first_out_slice.first().unwrap() == 0, "inverted first_out[0] != 0")?;
+        check(
+            *first_out_slice.last().unwrap() as usize == head_slice.len(),
+            "inverted first_out sentinel != head.len",
+        )?;
+        for window in first_out_slice.windows(2) {
+            check(window[0] <= window[1], "inverted first_out not monotonically non-decreasing")?;
+        }
+        check(head_slice.len() == edge_ids_slice.len(), "inverted head.len != edge_ids.len")?;
+
+        Ok(ReversedGraphWithEdgeIds { first_out, head, edge_ids })
+    }
 }
 
 impl<G: LinkIterable<(NodeIdT, EdgeIdT)>> BuildReversed<G> for ReversedGraphWithEdgeIds {
@@ -610,16 +655,16 @@ impl<G: LinkIterable<(NodeIdT, EdgeIdT)>> BuildReversed<G> for ReversedGraphWith
         reversed_first_out[0] = 0;
 
         ReversedGraphWithEdgeIds {
-            first_out: reversed_first_out,
-            head,
-            edge_ids,
+            first_out: Storage::from_vec(reversed_first_out),
+            head: Storage::from_vec(head),
+            edge_ids: Storage::from_vec(edge_ids),
         }
     }
 }
 
 impl Graph for ReversedGraphWithEdgeIds {
     fn degree(&self, node: NodeId) -> usize {
-        SlcsIdx(&self.first_out).range(node as usize).len()
+        SlcsIdx(self.first_out.as_slice()).range(node as usize).len()
     }
     fn num_nodes(&self) -> usize {
         self.first_out.len() - 1
@@ -633,7 +678,7 @@ impl LinkIterable<(NodeIdT, Reversed)> for ReversedGraphWithEdgeIds {
     type Iter<'a> = impl Iterator<Item = (NodeIdT, Reversed)> + 'a;
 
     fn link_iter(&self, node: NodeId) -> Self::Iter<'_> {
-        let range = SlcsIdx(&self.first_out).range(node as usize);
+        let range = SlcsIdx(self.first_out.as_slice()).range(node as usize);
         self.head[range.clone()]
             .iter()
             .copied()

@@ -10,30 +10,36 @@ pub const DEFAULT_STRETCH: f64 = 1.25;
 
 /// Max ratio of shared cost between two routes before the candidate is rejected as too similar.
 /// Nếu hai tuyến trùng nhau quá ngưỡng chi phí này thì tuyến mới bị loại vì quá giống.
-const SHARING_THRESHOLD: f64 = 0.8; /// Original value: 0.80
+const SHARING_THRESHOLD: f64 = 0.8;
+/// Original value: 0.80
 
 /// Epsilon for bounded stretch test: detour(A→B) must be ≤ optimal(A→B) × (1 + eps).
 /// Đoạn phân nhánh từ A đến B phải nhỏ hơn đường ngắn nhất A→B * (1 + eps).
 /// HIGHLY INFLUENTIAL PARAMETER - THAM SỐ QUAN TRỌNG
-const BOUNDED_STRETCH_EPS: f64 = 0.4; /// Original value: 0.25
+const BOUNDED_STRETCH_EPS: f64 = 0.4;
+/// Original value: 0.25
 
 /// T-test half-window as a fraction of shortest-path cost: defines the [v'-v''] subpath around the via node.
 /// Bán kính cửa sổ T-test tính theo phần trăm chi phí đường ngắn nhất, dùng để cắt đoạn quanh nút trung gian v'.
 /// HIGHLY INFLUENTIAL PARAMETER - THAM SỐ QUAN TRỌNG
-const LOCAL_OPT_T_FRACTION: f64 = 0.4; /// Original value: 0.25
+const LOCAL_OPT_T_FRACTION: f64 = 0.4;
+/// Original value: 0.25
 
 /// T-test tolerance: subpath cost must be ≤ optimal × (1 + epsilon). 0 = exact local optimality.
 /// Cho phép đoạn con trong vùng T-test dài hơn đường tối ưu tối đa 1 + epsilon lần. Đặt 0 nghĩa là phải tối ưu tuyệt đối.
 /// HIGHLY INFLUENTIAL PARAMETER - THAM SỐ QUAN TRỌNG
-const LOCAL_OPT_EPSILON: f64 = 0.1; /// Original value: 0
+const LOCAL_OPT_EPSILON: f64 = 0.1;
+/// Original value: 0
 
 /// Recursion stops when subproblem distance < this fraction of original distance.
 /// Dừng đệ quy khi bài toán con quá ngắn so với quãng đường gốc.
-const RECURSION_MIN_RATIO: f64 = 0.3; /// Original value: 0.30
+const RECURSION_MIN_RATIO: f64 = 0.3;
+/// Original value: 0.30
 
 /// Travel-time stretch cap: candidates exceeding shortest × this factor are skipped entirely.
 /// Bỏ qua luôn những ứng viên có thời gian di chuyển vượt quá đường ngắn nhất nhân hệ số này.
-const TRAVEL_TIME_STRETCH: f64 = 1.5; /// Original value: 1.5
+const TRAVEL_TIME_STRETCH: f64 = 1.5;
+/// Original value: 1.5
 
 #[derive(Debug, Clone)]
 pub struct AlternativeRoute {
