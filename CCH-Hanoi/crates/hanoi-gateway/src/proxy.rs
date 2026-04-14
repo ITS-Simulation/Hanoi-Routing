@@ -14,11 +14,11 @@ use crate::types::{GatewayQueryParam, InfoQuery};
 ///
 /// # API surface
 ///
-/// | Method | Path       | Description                                             |
+/// | Method | Path | Description |
 /// |--------|------------|---------------------------------------------------------|
-/// | POST   | `/query`   | Route query — `?profile=<name>` selects the backend     |
-/// | GET    | `/info`    | Backend metadata — `?profile=<name>` (optional)         |
-/// | GET    | `/profiles`| List all available routing profiles                     |
+/// | POST | `/query` | Route query — `?profile=<name>` selects the backend |
+/// | GET | `/info` | Backend metadata — `?profile=<name>` (optional) |
+/// | GET | `/profiles`| List all available routing profiles |
 ///
 /// ## Profile selection
 ///
@@ -50,7 +50,7 @@ pub struct GatewayState {
 impl GatewayState {
     pub fn new(profiles: HashMap<String, ProfileConfig>, timeout_secs: u64) -> Self {
         let client = if timeout_secs > 0 {
-            reqwest::Client::builder()
+            Client::builder()
                 .timeout(std::time::Duration::from_secs(timeout_secs))
                 .build()
                 .expect("failed to build reqwest client")
@@ -214,7 +214,7 @@ pub async fn handle_info(
 /// GET /profiles — list all available routing profiles.
 ///
 /// Returns a JSON object with the sorted profile names. Useful for client
-/// discovery (e.g. populating a dropdown).
+/// discovery (e.g., populating a dropdown).
 ///
 /// ```json
 /// { "profiles": ["car", "motorcycle"] }

@@ -9,7 +9,7 @@
 //! - Forbidden turn pairs involving those edges
 //! - Via-way restriction chains involving those edges
 
-use hanoi_core::via_way_restriction::load_via_way_chains;
+use hanoi_core::restrictions::via_way::load_via_way_chains;
 use rust_road_router::datastr::graph::*;
 use rust_road_router::io::Load;
 use std::{collections::BTreeSet, error::Error, path::PathBuf};
