@@ -1,5 +1,307 @@
 # CHANGELOGS.md
 
+## 2026-04-10 — implement proximity-first snapping and road-conforming connectors
+
+- **`CCH-Hanoi/crates/hanoi-core/src/line_graph.rs`** (updated): Replaced
+  composite snap-score ranking with the planned three-tier proximity-first
+  selection flow for `query_coords()` and `multi_query_coords()`, moved
+  projected snap points into the patched route coordinate chain, and
+  recompute turn distances after prepending source-side connector geometry.
+- **`CCH-Hanoi/crates/hanoi-core/src/cch.rs`** (updated): Applied the same
+  tiered snap-pair selection and projected-point-in-coordinates patching to
+  the normal-graph engine for parity, while keeping the existing public
+  query signatures intact.
+- **`CCH-Hanoi/crates/hanoi-core/src/geometry.rs`** (updated): Exposed
+  `annotate_distances()` as `pub(crate)` so line-graph coordinate patching can
+  recompute serialized `distance_to_next_m` values after coordinate-index
+  shifts.
+- **`CCH-Hanoi/crates/hanoi-core/src/spatial.rs`** (updated): Removed the
+  obsolete composite snap-scoring helpers/constants and their test coverage,
+  leaving snapping focused on candidate generation and connector geometry.
+- **`CCH-Hanoi/crates/hanoi-server/src/engine.rs`** (updated): Simplified
+  `connect_query_coordinates()` so responses only wrap the already-patched
+  route polyline with user origin/destination points; projected snap points are
+  no longer inserted separately.
+- **`CCH-Hanoi/crates/hanoi-core/src/cch.rs`**,
+  **`CCH-Hanoi/crates/hanoi-core/src/line_graph.rs`**, and
+  **`CCH-Hanoi/crates/hanoi-server/src/engine.rs`** (updated): Added
+  regression tests covering tiered selection behavior, projected endpoint
+  embedding/dedup, turn-distance recomputation after coordinate shifts, and
+  the simplified coordinate wrapper.
+- **`CCH-Hanoi/crates/hanoi-core/src/line_graph.rs`** (updated): Replaced the
+  earlier connector-drop-only Part C amendment with source/destination
+  backtrack clipping near projected snap points on two-way roads, rebased turn
+  indices after clipped geometry removal, and added regressions for clipping on
+  both ends plus turn remapping through the clipped coordinate chain.
+- **`CCH-Hanoi/crates/hanoi-core/src/line_graph.rs`** (updated): Cleaned up the
+  line-graph coordinate patching warnings by dropping an unused destination
+  append count and compiling the reverse-end clipping helper only for its test
+  coverage.
+- **`CCH-Hanoi/crates/hanoi-server/static/index.html`**,
+  **`CCH-Hanoi/crates/hanoi-server/static/app.js`**, and
+  **`CCH-Hanoi/crates/hanoi-server/static/styles.css`** (updated): Added a
+  frontend distance-measure tool with its own map interaction mode, live
+  sidebar stats, measured-path overlays, and matching legend/map guidance so
+  users can click out ad hoc distances without interfering with route queries.
+- **`CCH-Hanoi/crates/hanoi-server/static/index.html`**,
+  **`CCH-Hanoi/crates/hanoi-server/static/app.js`**, and
+  **`CCH-Hanoi/crates/hanoi-server/static/styles.css`** (updated): Added a
+  basemap flavor selector in the UI with a simpler light default plus balanced
+  and classic OSM options, so the map can stay readable while still offering
+  denser street context on demand.
+
+## 2026-04-09 — fix exact snap-edge entry and exit costs for coordinate routing
+
+- **`CCH-Hanoi/crates/hanoi-core/src/spatial.rs`** (updated): Added reusable
+  helpers for snap-position-aware partial-edge costs and snap-to-node /
+  snap-to-snap connector geometry so coordinate queries can use the exact
+  projected position on each edge instead of falling back to endpoint
+  heuristics.
+- **`CCH-Hanoi/crates/hanoi-core/src/cch.rs`** (updated): Normal-graph
+  coordinate queries now route from `src.head` to `dst.tail`, special-case
+  forward travel on the same snapped edge, and add exact source/destination
+  partial-edge costs before snap-pair ranking and response assembly.
+- **`CCH-Hanoi/crates/hanoi-core/src/line_graph.rs`** (updated): Line-graph
+  coordinate queries now preserve the existing trimmed-path flow while
+  replacing whole-edge endpoint costing with exact snap-edge suffix/prefix
+  costs, including a non-trivial same-edge fallback when the destination lies
+  behind the source on the same directed arc.
+- **`CCH-Hanoi/crates/hanoi-core/src/cch.rs`** and
+  **`CCH-Hanoi/crates/hanoi-core/src/line_graph.rs`** (updated): Coordinate
+  patching now uses cached snap projections directly and recomputes
+  `distance_m` with snapped endpoints included, so the numeric route distance
+  matches the visible geometry.
+- **`CCH-Hanoi/crates/hanoi-cli/src/main.rs`** (updated): Adjusted the
+  line-graph multi-query CLI path for the new mutable coordinate-query API.
+
+## 2026-04-09 — finish snap-aware routing and shape-point geometry
+
+- **`CCH-Generator/src/generate_graph.cpp`** (updated): Switched
+  RoutingKit road-geometry extraction from `OSMRoadGeometry::none` to
+  `OSMRoadGeometry::uncompressed` and now persist
+  `first_modelling_node` / `modelling_node_latitude` /
+  `modelling_node_longitude` alongside the existing graph vectors.
+- **`CCH-Hanoi/crates/hanoi-core/src/graph.rs`** (updated): Added optional
+  shape-point loading and validation to `GraphData`, keeping existing graphs
+  backward-compatible while rejecting partial shape-point datasets.
+- **`CCH-Hanoi/crates/hanoi-core/src/spatial.rs`** (updated): Reworked edge
+  snapping to project onto the full arc polyline instead of the tail-head
+  chord, cached the true projected point on `SnapResult`, added reusable route
+  geometry expansion / snap-connector helpers, introduced composite
+  snap-distance scoring (`distance_ms + snap penalties`), and added regression
+  tests for polyline snapping, geometry expansion, same-edge connectors, and
+  snap scoring.
+- **`CCH-Hanoi/crates/hanoi-core/src/cch.rs`** (updated): Normal-graph
+  queries now rank coordinate snap pairs by composite score instead of
+  first-success / pure travel time, expand route coordinates through shape
+  points, and splice snap-edge connector geometry into coordinate-query
+  answers without changing the response schema.
+- **`CCH-Hanoi/crates/hanoi-core/src/line_graph.rs`** (updated): Line-graph
+  coordinate queries now use the same composite snap ranking, expanded shape
+  geometry, trimmed-edge connector handling, and remapped
+  `TurnAnnotation.coordinate_index` values so maneuvers still point at the
+  correct coordinate after modelling nodes are inserted.
+
+## 2026-04-09 — implement snap projection and obvious maneuver promotion
+
+- **`CCH-Hanoi/crates/hanoi-core/src/spatial.rs`** (updated): Added
+  `SnapResult::projected_point()` so coordinate queries can recover the actual
+  closest point on the snapped edge instead of only the nearest endpoint.
+- **`CCH-Hanoi/crates/hanoi-core/src/cch.rs`** (updated): Extended
+  `QueryAnswer` with projected snap metadata and threaded projected origin /
+  destination points through normal-graph `query_coords()` and
+  `multi_query_coords()` without changing the existing snap-candidate selection
+  flow.
+- **`CCH-Hanoi/crates/hanoi-core/src/line_graph.rs`** (updated): Mirrored the
+  projected snap metadata flow for line-graph coordinate queries so trimmed and
+  multi-route answers carry the projected source / destination edge points.
+- **`CCH-Hanoi/crates/hanoi-core/src/geometry.rs`** (updated): Added the
+  `promote_obvious_maneuvers` pass at the end of `compute_turns()` so straight
+  choices at degree-3+ forks are promoted to slight maneuvers when there is a
+  competing straight-ish alternative, and added regression tests covering both
+  promotion and non-promotion cases.
+- **`CCH-Hanoi/crates/hanoi-server/src/engine.rs`** (updated): Rebuilt route
+  polyline assembly for JSON and GeoJSON responses as
+  `user -> projected snap -> graph path -> projected snap -> user`, with 1 m
+  dedup against the first/last graph node to avoid double points when the snap
+  already lands near an intersection, and added regression tests for the helper.
+
+## 2026-04-09 — fix roundabout straight aggregation and compound U-turn detection
+
+- **`CCH-Hanoi/crates/hanoi-core/src/geometry.rs`** (updated):
+  - `merge_straights` now also merges consecutive `RoundaboutStraight` entries,
+    collapsing noisy intermediate ring segments into a single instruction.
+  - New `collapse_compound_uturns` pass: detects two consecutive same-direction
+    turns (both >= 40°, sum >= 155°, <= 50m apart) and replaces them with a
+    single `UTurn`. Fixes misidentification of median-break U-turns as two
+    separate left turns.
+  - Pipeline order: collapse_degree2 → merge_straights → annotate_distances →
+    collapse_compound_uturns → strip_straights.
+
+## 2026-04-09 — fix snap gap between user origin/destination and route polyline
+
+- **`CCH-Hanoi/crates/hanoi-server/src/engine.rs`** (updated): Prepend user
+  origin and append user destination to the LineString coordinate path in all
+  three response builders (single GeoJSON, multi-route GeoJSON, plain JSON).
+  Eliminates the visual gap between the marker and the route line on map UIs.
+
+## 2026-04-09 — add CCH-Hanoi maintenance guide
+
+- **`CCH-Hanoi/README_MAINTENANCE.md`** (new): Maintenance guide covering
+  architecture, crate map, file-level risk classification, CCH lifecycle,
+  HTTP API reference, common tasks, build commands, and troubleshooting.
+- **`CCH-Hanoi/README_MAINTENANCE_VI.md`** (new): Vietnamese translation of
+  the maintenance guide.
+
+## 2026-04-09 — implement RAM-optimized CCH cache architecture
+
+- **`rust_road_router/engine/src/util.rs`** (updated): Added `Vecs`
+  serialization helpers and validated reconstruction so cached edge-mapping
+  data can be round-tripped with explicit CSR checks instead of raw-layout
+  assumptions, then extended the helper layer with shared `Storage<T>` backed
+  by either owned `Arc<Vec<T>>` or read-only `memmap2::Mmap`.
+- **`rust_road_router/engine/src/datastr/graph/first_out_graph.rs`** (updated):
+  Added read-only accessors and `ReversedGraphWithEdgeIds::from_raw_validated()`
+  so inverted directed-CCH graphs can be reconstructed from cache with CSR
+  validation, and later switched those topology arrays to `Storage<T>` so warm
+  cache loads can stay mmap-backed instead of materializing fresh `Vec`s.
+- **`rust_road_router/engine/src/algo/customizable_contraction_hierarchy/mod.rs`**
+  (updated): Implemented `DirectedCCH` deconstruction plus
+  `DirectedCCHReconstructor` with structural validation for topology, mappings,
+  node order, inverted graphs, and elimination tree data, then moved immutable
+  `DirectedCCH` topology/mapping storage onto `Storage<T>` so cache hits reuse
+  mmap-backed data directly.
+- **`rust_road_router/engine/src/datastr/node_order.rs`** and
+  **`rust_road_router/engine/src/datastr/graph.rs`** (updated): Switched
+  `NodeOrder` to shared storage and added `#[repr(transparent)]` wrappers for
+  graph/newtype serialization boundaries used by the cache and mmap path.
+- **`CCH-Hanoi/crates/hanoi-core/src/cch_cache.rs`** (new): Added the
+  cache-meta/checksum layer for CCH and DirectedCCH caches, including ABI/header
+  validation and reconstructor dispatch.
+- **`CCH-Hanoi/crates/hanoi-core/src/cch.rs`** and
+  **`CCH-Hanoi/crates/hanoi-core/src/line_graph.rs`** (updated): Switched both
+  `load_and_build()` paths to cache-or-build flow, added DirectedCCH post-load
+  edge-mapping validation, preserved rebuild fallback on cache miss or
+  validation error, and then converted baseline/original-graph storage in both
+  normal and line-graph contexts to shared `Storage<T>` so runtime weight and
+  topology arrays are reused instead of cloned.
+- **`CCH-Hanoi/crates/hanoi-core/src/graph.rs`** and
+  **`CCH-Hanoi/crates/hanoi-core/src/geometry.rs`** (updated): Reworked
+  `GraphData::load()` to mmap RoutingKit vectors with explicit structural
+  validation, and adjusted turn computation to resolve line-graph nodes through
+  `original_arc_id_of_lg_node` so original-graph arrays no longer need
+  line-graph-length duplication.
+- **`CCH-Hanoi/crates/hanoi-server/src/route_eval.rs`**,
+  **`CCH-Hanoi/crates/hanoi-server/src/state.rs`**, and
+  **`CCH-Hanoi/crates/hanoi-server/src/handlers.rs`** (updated): Propagated the
+  shared-storage model into server state and exact-route evaluation so baseline
+  weights and original-graph arrays are reused without extra heap copies on
+  startup.
+- **`CCH-Hanoi/crates/hanoi-core/src/lib.rs`** and
+  **`CCH-Hanoi/crates/hanoi-core/Cargo.toml`** (updated): Wired in the new
+  internal cache module and added `chrono` for RFC3339 cache metadata
+  timestamps plus `memmap2` for the shared read-only graph/CCH storage path.
+- **`rust_road_router/engine/Cargo.toml`** and
+  **`CCH-Hanoi/crates/hanoi-server/Cargo.toml`** (updated): Added the runtime
+  dependency support needed for mmap-backed storage through the engine and
+  server stack.
+
+## 2026-04-08 — Concurrency plan: replace tokio::mpsc + TokioMutex with flume MPMC
+
+- **`docs/planned/Concurrency-10K-CCU.md`** (amended): Replaced
+  `tokio::mpsc` + `Arc<TokioMutex<Receiver>>` worker-pool design with
+  `flume::bounded` MPMC channel. Receiver is Clone — each worker gets its own
+  handle, eliminating the Mutex synchronization layer. Updated R1 (pool
+  architecture, code snippets, audit), R2 (channel creation), R4 (worker loop
+  `recv_async`, match arms for `RecvError`), R6a (`flume::TrySendError`), R6c
+  (health endpoint uses `capacity()` + `len()`), risk table, and files-changed
+  table. New dependency: `flume` in `hanoi-server/Cargo.toml`.
+
+## 2026-04-08 — plan amendment round 6: 3 residual issues in RAM-optimized CCH plan
+
+- **`docs/planned/RAM-Optimized-CCH-Architecture.md`** (amended): Fixed 3 residual
+  issues: (1) validate_edge_mappings needs CCHT + EdgeIdT imports not currently in
+  line_graph.rs — added import note with exact use statements; (2) Step 5
+  original_tail / original_arc_id_of_lg_node decision was deferred — resolved as
+  Option 2 (recompute at startup, ~15-25 MB heap, O(n) fast); (3) normal-graph
+  CCHReconstrctor hardening gap acknowledged as intentional weaker path —
+  no change, already documented.
+
+## 2026-04-08 — plan amendment round 5: 2 issues + nit in RAM-optimized CCH plan
+
+- **`docs/planned/RAM-Optimized-CCH-Architecture.md`** (amended): Fixed 2 issues
+  + 1 nit: (1) Step 4 load path aborted on corrupt cache instead of rebuilding —
+  replaced `cache.load()?` with match/fallback that catches io::Error and falls
+  through to build-from-scratch; (2) edge mapping data values (fw/bw
+  edge_to_orig_data) not range-checked against source graph — added post-load
+  `validate_edge_mappings()` in hanoi-core that checks all EdgeIdT values <
+  num_metric_edges before customization can use them; also added design rationale
+  for two-layer validation (structural in rust_road_router, semantic in
+  hanoi-core). Nit: P9 snippet updated to pass source_files to cache.save().
+  Risk table expanded with 2 new entries.
+
+## 2026-04-08 — plan amendment round 4: 4 issues + nits in RAM-optimized CCH plan
+
+- **`docs/planned/RAM-Optimized-CCH-Architecture.md`** (amended): Fixed 4 issues
+  + minor nits: (1) NodeOrder serialization round-trip broken — save_each writes
+  "ranks" but reconstructor loaded "cch_order"; unified on ranks-based path with
+  from_ranks(); (2) first_out monotonicity missing — added windows(2) checks on
+  all directed topology + inverted first_out arrays, also added to
+  from_raw_validated; (3) elimination tree cycle → infinite loop — added
+  pre-construction parent_rank > child_rank check to block cycles before
+  SeparatorTree::new() can hang; (4) normal-graph CCHReconstrctor still uses
+  assert! — documented as known gap, scoped strong guarantees to DirectedCCH only.
+  Nits: Phase B reconstruct_with(Loader) → reconstruct_from, Step 4 example now
+  passes source_files to is_valid/save. Risk table expanded with 5 new entries.
+
+## 2026-04-08 — plan amendment round 3: 3 more issues in RAM-optimized CCH plan
+
+- **`docs/planned/RAM-Optimized-CCH-Architecture.md`** (amended): Fixed 3 more
+  issues: (1) Value-range checks missing — added per-element bounds validation for
+  all head/tail (< num_nodes) and inverted edge_ids (< num_fw/bw_edges) arrays,
+  since customization/directed.rs uses get_unchecked_mut with this assumption;
+  (2) NodeOrder permutation not truly validated — replaced NodeOrder::reconstruct_from
+  (backed by debug_assert!, silent in release) with manual bijection check
+  (seen[] array, returns InvalidData on duplicate/out-of-range); (3) Step 5 scope
+  table overstated mmap coverage — original_tail (reconstructed via CSR loop) and
+  original_arc_id_of_lg_node (synthesized + split-extended) cannot be directly
+  mmap'd; table corrected with two implementation options (cache flat file vs recompute).
+
+## 2026-04-08 — plan amendment round 2: 5 more issues in RAM-optimized CCH plan
+
+- **`docs/planned/RAM-Optimized-CCH-Architecture.md`** (amended): Fixed 5 more
+  issues: (1) Cross-structure size validation — reconstructor now checks
+  mapping/inverted/tree/order sizes against directed topology (prevents silent
+  zip truncation in prepare_weights); (2) assert!→io::Error — all from_raw and
+  reconstructor validation returns InvalidData, not panic (matches graph.rs
+  pattern); (3) Loader::new API doesn't exist — fixed to reconstruct_from();
+  (4) Step 5 mmap scope under-specified — added explicit table of all Vec
+  owners that must be covered for 400–600 MB target; (5) Normal-graph caching
+  clarified — reuses existing CCHReconstrctor, no new rust_road_router code.
+
+## 2026-04-08 — plan amendment: 5 soundness issues in RAM-optimized CCH plan
+
+- **`docs/planned/RAM-Optimized-CCH-Architecture.md`** (amended): Fixed 5
+  confirmed issues: (1) InRangeOption/EdgeIdT lack #[repr(transparent)] — now
+  serialize through inner u32, not raw bytes; (2) no cache schema/ABI marker —
+  added cache_meta header with version, endianness, pointer_width; (3) DirectedCCH
+  reconstruction impossible from outside crate — added ReconstructPrepared impl
+  inside rust_road_router (approved exception); (4) from_raw constructors
+  bypassed CSR validation — added structural asserts; (5) travel_time in
+  checksum rationale was wrong (always_infinity uses prepare_zero_weights, not
+  travel_time) — removed from checksum. Also: withdrew Vecs first_idx usize→u32
+  in-memory conversion (serialize on-the-fly instead), corrected P8 access
+  pattern claim, renumbered steps (5→4 steps + future mmap).
+
+## 2026-04-08 — walkthrough: RAM-optimized CCH architecture plan
+
+- **`docs/walkthrough/RAM-Optimized-CCH-Architecture.md`** (new): Full
+  serialization + mmap architectural plan to reduce steady-state RAM from ~2.2 GB
+  to ~400–600 MB. Covers data structure audit, two-phase startup (build+cache vs
+  mmap-load), 6-step implementation order, 10 identified potential problems.
+  All decisions confirmed: u32 for Vecs indices (P4), SHA-256 content hash (P6),
+  explicit CCH drop for first-run cleanup (P9), profile-scoped cache dirs.
+
 ## 2026-04-08 �� documentation update: multi-route, Vietnamese translations
 
 - **`CCH-Hanoi/README.md`** (updated): Added K-alternative routes to system

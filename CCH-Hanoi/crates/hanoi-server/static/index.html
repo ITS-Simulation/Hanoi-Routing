@@ -94,8 +94,63 @@
         <section class="glass-card section-card compact-section">
           <div class="section-head">
             <div>
+              <p class="section-kicker">Map Tools</p>
+              <h2>Measure Distance</h2>
+            </div>
+            <span id="measure-mode-chip" class="soft-chip measure-chip">Route picker</span>
+          </div>
+          <div class="segmented-control workspace-tabs" role="tablist" aria-label="Map interaction tool">
+            <button id="map-tool-query-btn" type="button" class="segment-btn active">Route Picker</button>
+            <button id="map-tool-measure-btn" type="button" class="segment-btn">Measure</button>
+          </div>
+
+          <div class="measure-grid">
+            <div>
+              <span class="detail-label">Distance</span>
+              <span id="measure-distance" class="detail-value">—</span>
+            </div>
+            <div>
+              <span class="detail-label">Segments</span>
+              <span id="measure-segments" class="detail-value">0</span>
+            </div>
+            <div>
+              <span class="detail-label">Points</span>
+              <span id="measure-points" class="detail-value">0</span>
+            </div>
+          </div>
+
+          <p id="measure-status" class="section-note">
+            Route picker is active. Switch to Measure to click out a custom path on the map.
+          </p>
+
+          <div class="action-row measure-action-row">
+            <button id="measure-undo-btn" type="button" class="secondary-btn">Undo</button>
+            <button id="measure-clear-btn" type="button" class="secondary-btn">Clear Measure</button>
+          </div>
+        </section>
+
+        <section class="glass-card section-card compact-section">
+          <div class="section-head">
+            <div>
               <p class="section-kicker">Map Layers</p>
               <h2>Overlays</h2>
+            </div>
+          </div>
+
+          <div class="base-map-panel">
+            <div class="layer-control-row base-layer-row">
+              <div>
+                <span class="detail-label">Base Map</span>
+                <p id="base-map-status" class="section-note compact-note">
+                  Simple Light is active. This low-clutter style keeps the route and GeoJSON overlays in focus.
+                </p>
+              </div>
+            </div>
+
+            <div class="segmented-control base-map-tabs" role="tablist" aria-label="Base map flavor">
+              <button id="base-map-simple-btn" type="button" class="segment-btn active">Simple Light</button>
+              <button id="base-map-balanced-btn" type="button" class="segment-btn">Balanced Streets</button>
+              <button id="base-map-osm-btn" type="button" class="segment-btn">Classic OSM</button>
             </div>
           </div>
 
@@ -438,6 +493,10 @@
             <div class="legend-row">
               <span class="legend-swatch legend-swatch-destination"></span>
               <span>Destination point</span>
+            </div>
+            <div class="legend-row">
+              <span class="legend-swatch legend-swatch-measure"></span>
+              <span>Measured path</span>
             </div>
             <div class="legend-divider"></div>
             <div class="legend-row">

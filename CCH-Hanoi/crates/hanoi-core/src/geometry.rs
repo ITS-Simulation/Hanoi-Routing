@@ -3,7 +3,7 @@ use serde::Serialize;
 
 use crate::spatial::haversine_m;
 
-const STRAIGHT_THRESHOLD_DEG: f64 = 15.0;
+const STRAIGHT_THRESHOLD_DEG: f64 = 20.0;
 const SLIGHT_THRESHOLD_DEG: f64 = 40.0;
 const SHARP_THRESHOLD_DEG: f64 = 110.0;
 const U_TURN_THRESHOLD_DEG: f64 = 155.0;
@@ -20,14 +20,16 @@ pub enum TurnDirection {
     SharpLeft,
     SharpRight,
     UTurn,
-    RoundaboutStraight,
-    RoundaboutSlightLeft,
-    RoundaboutSlightRight,
-    RoundaboutLeft,
-    RoundaboutRight,
-    RoundaboutSharpLeft,
-    RoundaboutSharpRight,
-    RoundaboutUTurn,
+    /// Entering a roundabout.
+    RoundaboutEnter,
+    /// Exit roundabout going straight through.
+    RoundaboutExitStraight,
+    /// Exit roundabout to the right (first exit in right-hand traffic).
+    RoundaboutExitRight,
+    /// Exit roundabout to the left (go around most of the ring).
+    RoundaboutExitLeft,
+    /// Exit roundabout back the way you came (full loop).
+    RoundaboutExitUturn,
 }
 
 /// A single turn annotation along a route.
@@ -51,45 +53,10 @@ pub struct TurnAnnotation {
     /// Degree of the intersection node in the original graph (outgoing edges).
     #[serde(skip)]
     pub intersection_degree: u32,
-}
 
-fn with_roundabout_prefix(direction: TurnDirection, is_roundabout: bool) -> TurnDirection {
-    if !is_roundabout {
-        return direction;
-    }
-
-    match direction {
-        TurnDirection::Straight => TurnDirection::RoundaboutStraight,
-        TurnDirection::SlightLeft => TurnDirection::RoundaboutSlightLeft,
-        TurnDirection::SlightRight => TurnDirection::RoundaboutSlightRight,
-        TurnDirection::Left => TurnDirection::RoundaboutLeft,
-        TurnDirection::Right => TurnDirection::RoundaboutRight,
-        TurnDirection::SharpLeft => TurnDirection::RoundaboutSharpLeft,
-        TurnDirection::SharpRight => TurnDirection::RoundaboutSharpRight,
-        TurnDirection::UTurn => TurnDirection::RoundaboutUTurn,
-        TurnDirection::RoundaboutStraight
-        | TurnDirection::RoundaboutSlightLeft
-        | TurnDirection::RoundaboutSlightRight
-        | TurnDirection::RoundaboutLeft
-        | TurnDirection::RoundaboutRight
-        | TurnDirection::RoundaboutSharpLeft
-        | TurnDirection::RoundaboutSharpRight
-        | TurnDirection::RoundaboutUTurn => direction,
-    }
-}
-
-fn is_roundabout_direction(direction: TurnDirection) -> bool {
-    matches!(
-        direction,
-        TurnDirection::RoundaboutStraight
-            | TurnDirection::RoundaboutSlightLeft
-            | TurnDirection::RoundaboutSlightRight
-            | TurnDirection::RoundaboutLeft
-            | TurnDirection::RoundaboutRight
-            | TurnDirection::RoundaboutSharpLeft
-            | TurnDirection::RoundaboutSharpRight
-            | TurnDirection::RoundaboutUTurn
-    )
+    /// Whether this turn involves a roundabout arc (used for roundabout grouping).
+    #[serde(skip)]
+    pub is_roundabout: bool,
 }
 
 /// Compute the signed turn angle between segment A (`tail_a -> head_a`) and
@@ -122,11 +89,11 @@ pub fn compute_turn_angle(
     (cross.atan2(dot), cross)
 }
 
-/// Classify a turn angle into one of 16 directions (8 base + 8 roundabout).
-pub fn classify_turn(angle_degrees: f64, cross: f64, is_roundabout: bool) -> TurnDirection {
+/// Classify a turn angle into a direction.
+pub fn classify_turn(angle_degrees: f64, cross: f64) -> TurnDirection {
     let abs_angle = angle_degrees.abs();
 
-    let base = if abs_angle < STRAIGHT_THRESHOLD_DEG {
+    if abs_angle < STRAIGHT_THRESHOLD_DEG {
         TurnDirection::Straight
     } else if abs_angle < SLIGHT_THRESHOLD_DEG {
         if cross > 0.0 {
@@ -153,10 +120,14 @@ pub fn classify_turn(angle_degrees: f64, cross: f64, is_roundabout: bool) -> Tur
             TurnDirection::Straight
         }
     } else {
-        TurnDirection::UTurn
-    };
-
-    with_roundabout_prefix(base, is_roundabout)
+        // In right-hand traffic, U-turns are always left turns (crossing
+        // oncoming lanes). A ≥155° right deviation is just a sharp right.
+        if cross >= 0.0 {
+            TurnDirection::UTurn
+        } else {
+            TurnDirection::SharpRight
+        }
+    }
 }
 
 /// Compute raw turn annotations for a line-graph path.
@@ -166,6 +137,7 @@ pub fn classify_turn(angle_degrees: f64, cross: f64, is_roundabout: bool) -> Tur
 /// compute the intersection node degree.
 pub fn compute_turns(
     lg_path: &[NodeId],
+    original_arc_id_of_lg_node: &[u32],
     original_tail: &[NodeId],
     original_head: &[NodeId],
     original_first_out: &[EdgeId],
@@ -176,8 +148,8 @@ pub fn compute_turns(
     let mut turns = Vec::new();
 
     for i in 0..lg_path.len().saturating_sub(1) {
-        let edge_a = lg_path[i] as usize;
-        let edge_b = lg_path[i + 1] as usize;
+        let edge_a = original_arc_id_of_lg_node[lg_path[i] as usize] as usize;
+        let edge_b = original_arc_id_of_lg_node[lg_path[i + 1] as usize] as usize;
 
         let tail_a = original_tail[edge_a];
         let head_a = original_head[edge_a];
@@ -193,7 +165,7 @@ pub fn compute_turns(
             compute_turn_angle(tail_a, head_a, head_b, original_lat, original_lng);
         let angle_degrees = angle_radians.to_degrees();
         let is_roundabout = is_arc_roundabout[edge_a] != 0 || is_arc_roundabout[edge_b] != 0;
-        let direction = classify_turn(angle_degrees, cross, is_roundabout);
+        let direction = classify_turn(angle_degrees, cross);
 
         let node = head_a as usize;
         let intersection_degree = original_first_out[node + 1] - original_first_out[node];
@@ -204,35 +176,103 @@ pub fn compute_turns(
             coordinate_index: (i + 1) as u32,
             distance_to_next_m: 0.0,
             intersection_degree,
+            is_roundabout,
         });
     }
+
+    resolve_slight_turns(
+        &mut turns,
+        lg_path,
+        original_arc_id_of_lg_node,
+        original_tail,
+        original_head,
+        original_first_out,
+        original_lat,
+        original_lng,
+    );
 
     turns
 }
 
-fn collapse_degree2_subrun(subrun: &[TurnAnnotation], collapsed: &mut Vec<TurnAnnotation>) {
-    if subrun.is_empty() {
-        return;
+/// Maximum angular gap (degrees) between the route exit and the closest
+/// alternative for the intersection to be considered ambiguous.  Below this
+/// gap, the driver could easily take the wrong fork → emit slight turn.
+const SLIGHT_FORK_GAP_DEG: f64 = 20.0;
+
+/// Resolve slight turns: only emit SlightLeft/SlightRight when the intersection
+/// has a competing fork close in angle (ambiguous fork).  Otherwise demote to
+/// Straight.
+fn resolve_slight_turns(
+    turns: &mut [TurnAnnotation],
+    lg_path: &[NodeId],
+    original_arc_id_of_lg_node: &[u32],
+    original_tail: &[NodeId],
+    original_head: &[NodeId],
+    original_first_out: &[EdgeId],
+    original_lat: &[f32],
+    original_lng: &[f32],
+) {
+    for turn in turns.iter_mut() {
+        if turn.intersection_degree < 3 {
+            continue;
+        }
+
+        if !matches!(
+            turn.direction,
+            TurnDirection::Straight | TurnDirection::SlightLeft | TurnDirection::SlightRight
+        ) {
+            continue;
+        }
+
+        let lg_idx = turn.coordinate_index.saturating_sub(1) as usize;
+        if lg_idx + 1 >= lg_path.len() {
+            continue;
+        }
+
+        let edge_a = original_arc_id_of_lg_node[lg_path[lg_idx] as usize] as usize;
+        let edge_b = original_arc_id_of_lg_node[lg_path[lg_idx + 1] as usize] as usize;
+        let intersection_node = original_head[edge_a];
+        let start = original_first_out[intersection_node as usize] as usize;
+        let end = original_first_out[intersection_node as usize + 1] as usize;
+        let tail_a = original_tail[edge_a];
+
+        // Find the nearest alternative exit by angular gap to our route exit
+        let nearest_gap = (start..end)
+            .filter(|&arc| arc != edge_b)
+            .map(|arc| {
+                let head_alt = original_head[arc];
+                let (angle_radians, _) = compute_turn_angle(
+                    tail_a,
+                    intersection_node,
+                    head_alt,
+                    original_lat,
+                    original_lng,
+                );
+                let alt_deg = angle_radians.to_degrees();
+                (alt_deg, (turn.angle_degrees - alt_deg).abs())
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1));
+
+        if let Some((alt_angle, gap)) = nearest_gap {
+            if gap < SLIGHT_FORK_GAP_DEG {
+                let go_left = turn.angle_degrees > alt_angle;
+                turn.direction = if go_left {
+                    TurnDirection::SlightLeft
+                } else {
+                    TurnDirection::SlightRight
+                };
+                continue;
+            }
+        }
+
+        turn.direction = TurnDirection::Straight;
     }
+}
 
-    let net_angle: f64 = subrun.iter().map(|turn| turn.angle_degrees).sum();
-    let is_roundabout = subrun
-        .iter()
-        .any(|turn| is_roundabout_direction(turn.direction));
-
-    if net_angle.abs() < STRAIGHT_THRESHOLD_DEG && !is_roundabout {
-        return;
-    }
-
-    let last = subrun.last().expect("non-empty degree-2 subrun");
-    let direction = classify_turn(net_angle, net_angle.signum(), is_roundabout);
-    collapsed.push(TurnAnnotation {
-        direction,
-        angle_degrees: net_angle,
-        coordinate_index: last.coordinate_index,
-        distance_to_next_m: 0.0,
-        intersection_degree: last.intersection_degree,
-    });
+fn collapse_degree2_subrun(_subrun: &[TurnAnnotation], _collapsed: &mut Vec<TurnAnnotation>) {
+    // Degree-2 nodes have no alternative exits — the driver has no choice.
+    // All degree-2 curvature (road bends and roundabout ring segments) is
+    // silently absorbed. Roundabout entry/exit happen at degree ≥ 3 nodes.
 }
 
 /// Collapse degree-2 curvature noise using run-based analysis.
@@ -285,19 +325,20 @@ fn merge_straights(turns: &mut Vec<TurnAnnotation>) {
             i += 1;
             continue;
         }
+        let dir = input[i].direction;
 
-        let mut merged_straight = input[i].clone();
-        let mut cumulative_angle = merged_straight.angle_degrees;
+        let mut merged_entry = input[i].clone();
+        let mut cumulative_angle = merged_entry.angle_degrees;
         i += 1;
 
-        while i < input.len() && input[i].direction == TurnDirection::Straight {
+        while i < input.len() && input[i].direction == dir {
             cumulative_angle += input[i].angle_degrees;
             i += 1;
         }
 
-        merged_straight.angle_degrees = cumulative_angle;
-        merged_straight.distance_to_next_m = 0.0;
-        merged.push(merged_straight);
+        merged_entry.angle_degrees = cumulative_angle;
+        merged_entry.distance_to_next_m = 0.0;
+        merged.push(merged_entry);
     }
 
     *turns = merged;
@@ -334,7 +375,7 @@ fn path_distance(coordinates: &[(f32, f32)], start: usize, end: usize) -> f64 {
 /// The first turn's distance spans from the route start (coordinate 0) to the
 /// next turn's coordinate — this ensures the leading-straight distance covers
 /// "head straight from trip start for X meters" rather than starting mid-route.
-fn annotate_distances(turns: &mut Vec<TurnAnnotation>, coordinates: &[(f32, f32)]) {
+pub(crate) fn annotate_distances(turns: &mut Vec<TurnAnnotation>, coordinates: &[(f32, f32)]) {
     let route_end = coordinates.len().saturating_sub(1);
 
     for idx in 0..turns.len() {
@@ -351,7 +392,7 @@ fn annotate_distances(turns: &mut Vec<TurnAnnotation>, coordinates: &[(f32, f32)
     }
 }
 
-/// Strip interior Straights (not RoundaboutStraight); preserve leading Straight.
+/// Strip interior Straights; preserve leading Straight.
 fn strip_straights(turns: &mut Vec<TurnAnnotation>) {
     let input = std::mem::take(turns);
     let mut stripped: Vec<TurnAnnotation> = Vec::with_capacity(input.len());
@@ -391,12 +432,153 @@ fn strip_straights(turns: &mut Vec<TurnAnnotation>) {
     *turns = stripped;
 }
 
-/// Full post-processing pipeline (calls all four above in order).
+/// Maximum distance (meters) between two consecutive turns for them to be
+/// collapsed as a compound via-way turn. Median breaks, short connectors,
+/// and service roads in Hanoi are typically < 30m; 40m provides margin.
+const COMPOUND_TURN_MAX_DISTANCE_M: f64 = 50.0;
+
+/// Collapse compound via-way turns: two consecutive same-direction turns
+/// through a short connector segment.
+///
+/// In right-hand traffic:
+/// - right + right → single Right/SharpRight (via-way right turn)
+/// - left + left  → UTurn (median break; the only physical via-way left)
+fn collapse_compound_turns(turns: &mut Vec<TurnAnnotation>, coordinates: &[(f32, f32)]) {
+    if turns.len() < 2 {
+        return;
+    }
+
+    let input = std::mem::take(turns);
+    let mut result: Vec<TurnAnnotation> = Vec::with_capacity(input.len());
+    let mut i = 0;
+
+    while i < input.len() {
+        if i + 1 < input.len() {
+            let a = &input[i];
+            let b = &input[i + 1];
+
+            let both_left = a.angle_degrees > 0.0 && b.angle_degrees > 0.0;
+            let both_right = a.angle_degrees < 0.0 && b.angle_degrees < 0.0;
+            let both_substantial = a.angle_degrees.abs() >= STRAIGHT_THRESHOLD_DEG
+                && b.angle_degrees.abs() >= STRAIGHT_THRESHOLD_DEG;
+            // Use coordinate-based distance between the two turn nodes,
+            // not distance_to_next_m which may be inflated by absorbed Straights.
+            let connector_dist = path_distance(
+                coordinates,
+                a.coordinate_index as usize,
+                b.coordinate_index as usize,
+            );
+            let close_enough = connector_dist <= COMPOUND_TURN_MAX_DISTANCE_M;
+
+            if both_substantial && close_enough {
+                let sum = a.angle_degrees + b.angle_degrees;
+
+                // Via-way right turn: right + right → single right, but only
+                // if the sum stays within one-turn range (≤ 110°). Two 90°
+                // rights summing to 180° are two distinct turns, not one.
+                if both_right && sum.abs() <= SHARP_THRESHOLD_DEG {
+                    result.push(TurnAnnotation {
+                        direction: classify_turn(sum, -1.0),
+                        angle_degrees: sum,
+                        coordinate_index: a.coordinate_index,
+                        distance_to_next_m: a.distance_to_next_m + b.distance_to_next_m,
+                        intersection_degree: a.intersection_degree,
+                        is_roundabout: a.is_roundabout || b.is_roundabout,
+                    });
+                    i += 2;
+                    continue;
+                }
+
+                if both_left && sum.abs() >= U_TURN_THRESHOLD_DEG {
+                    result.push(TurnAnnotation {
+                        direction: TurnDirection::UTurn,
+                        angle_degrees: sum,
+                        coordinate_index: a.coordinate_index,
+                        distance_to_next_m: a.distance_to_next_m + b.distance_to_next_m,
+                        intersection_degree: a.intersection_degree,
+                        is_roundabout: a.is_roundabout || b.is_roundabout,
+                    });
+                    i += 2;
+                    continue;
+                }
+
+            }
+        }
+
+        result.push(input[i].clone());
+        i += 1;
+    }
+
+    *turns = result;
+}
+
+/// Thresholds for roundabout exit classification based on net traversal angle.
+/// Roundabout exits are discrete (typically ~90° apart), so thresholds bisect
+/// the gap between adjacent exit types.
+const ROUNDABOUT_STRAIGHT_THRESHOLD_DEG: f64 = 30.0;
+const ROUNDABOUT_UTURN_THRESHOLD_DEG: f64 = 135.0;
+
+/// Classify a roundabout exit based on the net angle across the entire ring traversal.
+fn classify_roundabout_exit(net_angle: f64) -> TurnDirection {
+    let abs = net_angle.abs();
+    if abs < ROUNDABOUT_STRAIGHT_THRESHOLD_DEG {
+        TurnDirection::RoundaboutExitStraight
+    } else if abs >= ROUNDABOUT_UTURN_THRESHOLD_DEG {
+        TurnDirection::RoundaboutExitUturn
+    } else if net_angle < 0.0 {
+        // Negative = right (first exit in right-hand traffic)
+        TurnDirection::RoundaboutExitRight
+    } else {
+        // Positive = left (go around most of the ring)
+        TurnDirection::RoundaboutExitLeft
+    }
+}
+
+/// Collapse consecutive roundabout turns into at most 2: enter + exit.
+/// The exit direction is classified by the net angle across the full traversal.
+fn collapse_roundabouts(turns: &mut Vec<TurnAnnotation>) {
+    let input = std::mem::take(turns);
+    let mut result: Vec<TurnAnnotation> = Vec::with_capacity(input.len());
+    let mut i = 0;
+
+    while i < input.len() {
+        if !input[i].is_roundabout {
+            result.push(input[i].clone());
+            i += 1;
+            continue;
+        }
+
+        // Collect the full roundabout run
+        let run_start = i;
+        while i < input.len() && input[i].is_roundabout {
+            i += 1;
+        }
+        let run = &input[run_start..i];
+
+        let net_angle: f64 = run.iter().map(|t| t.angle_degrees).sum();
+
+        let mut entry = run[0].clone();
+        entry.direction = TurnDirection::RoundaboutEnter;
+        result.push(entry);
+
+        // Exit uses the last turn's position but net angle for classification
+        let mut exit = run[run.len() - 1].clone();
+        exit.direction = classify_roundabout_exit(net_angle);
+        exit.angle_degrees = net_angle;
+        result.push(exit);
+    }
+
+    *turns = result;
+}
+
+/// Full post-processing pipeline.
 pub fn refine_turns(turns: &mut Vec<TurnAnnotation>, coordinates: &[(f32, f32)]) {
     collapse_degree2_curves(turns);
     merge_straights(turns);
+    collapse_roundabouts(turns);
     annotate_distances(turns, coordinates);
     strip_straights(turns);
+    collapse_compound_turns(turns, coordinates);
 
     if turns.is_empty() && !coordinates.is_empty() {
         turns.push(TurnAnnotation {
@@ -405,6 +587,8 @@ pub fn refine_turns(turns: &mut Vec<TurnAnnotation>, coordinates: &[(f32, f32)])
             coordinate_index: 0,
             distance_to_next_m: path_distance(coordinates, 0, coordinates.len().saturating_sub(1)),
             intersection_degree: 0,
+            is_roundabout: false,
         });
     }
 }
+

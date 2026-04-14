@@ -40,6 +40,7 @@ impl Sentinel for usize {
 ///
 /// `InRangeOptions` are constructed from real `Options`.
 /// To work with the encapsulated data, the type has to be converted back into an actual `Option` through the `value` method.
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct InRangeOption<T: Sentinel + Debug>(T);
 

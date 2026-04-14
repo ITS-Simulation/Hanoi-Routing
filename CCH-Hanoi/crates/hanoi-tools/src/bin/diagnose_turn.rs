@@ -44,10 +44,7 @@ struct Args {
 
 fn haversine_m(lat1: f64, lng1: f64, lat2: f64, lng2: f64) -> f64 {
     const R: f64 = 6_371_000.0;
-    let (dlat, dlng) = (
-        (lat2 - lat1).to_radians(),
-        (lng2 - lng1).to_radians(),
-    );
+    let (dlat, dlng) = ((lat2 - lat1).to_radians(), (lng2 - lng1).to_radians());
     let a = (dlat / 2.0).sin().powi(2)
         + lat1.to_radians().cos() * lat2.to_radians().cos() * (dlng / 2.0).sin().powi(2);
     R * 2.0 * a.sqrt().asin()
@@ -116,12 +113,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Find all nodes within radius
     let mut nearby_nodes: Vec<(NodeId, f64)> = Vec::new();
     for node in 0..num_nodes {
-        let d = haversine_m(
-            args.lat,
-            args.lng,
-            lat[node] as f64,
-            lng[node] as f64,
-        );
+        let d = haversine_m(args.lat, args.lng, lat[node] as f64, lng[node] as f64);
         if d <= args.radius {
             nearby_nodes.push((node as NodeId, d));
         }
@@ -129,7 +121,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     nearby_nodes.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
     if nearby_nodes.is_empty() {
-        println!("No nodes found within {:.0}m of ({}, {})", args.radius, args.lat, args.lng);
+        println!(
+            "No nodes found within {:.0}m of ({}, {})",
+            args.radius, args.lat, args.lng
+        );
         println!("Try increasing --radius");
         return Ok(());
     }
@@ -174,11 +169,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let tt = travel_time[edge_id];
                 println!(
                     "    edge {} -> node {} ({:.6}, {:.6})  tt={}ms",
-                    edge_id,
-                    h,
-                    lat[h as usize],
-                    lng[h as usize],
-                    tt,
+                    edge_id, h, lat[h as usize], lng[h as usize], tt,
                 );
                 nearby_edge_ids.insert(edge_id as EdgeId);
             }
@@ -192,11 +183,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let tt = travel_time[edge_id as usize];
                 println!(
                     "    edge {} <- node {} ({:.6}, {:.6})  tt={}ms",
-                    edge_id,
-                    t,
-                    lat[t as usize],
-                    lng[t as usize],
-                    tt,
+                    edge_id, t, lat[t as usize], lng[t as usize], tt,
                 );
                 nearby_edge_ids.insert(edge_id);
             }
@@ -216,12 +203,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let to_head = head[to as usize];
             println!(
                 "  FORBIDDEN: edge {} (node {} -> {}) => edge {} (node {} -> {})",
-                from,
-                from_tail,
-                via_node,
-                to,
-                via_node,
-                to_head,
+                from, from_tail, via_node, to, via_node, to_head,
             );
             println!(
                 "    path: ({:.6},{:.6}) -> ({:.6},{:.6}) -> ({:.6},{:.6})",
@@ -246,12 +228,20 @@ fn main() -> Result<(), Box<dyn Error>> {
     for (idx, chain) in chains.iter().enumerate() {
         let involves_nearby = chain.arcs.iter().any(|arc| nearby_edge_ids.contains(arc));
         if involves_nearby {
-            let kind = if chain.mandatory { "MANDATORY" } else { "PROHIBITIVE" };
+            let kind = if chain.mandatory {
+                "MANDATORY"
+            } else {
+                "PROHIBITIVE"
+            };
             println!("  Chain #{} ({}, {} arcs):", idx, kind, chain.arcs.len());
             for (i, &arc) in chain.arcs.iter().enumerate() {
                 let t = tail.get(arc as usize).copied().unwrap_or(u32::MAX);
                 let h = head.get(arc as usize).copied().unwrap_or(u32::MAX);
-                let marker = if nearby_edge_ids.contains(&arc) { " <-- nearby" } else { "" };
+                let marker = if nearby_edge_ids.contains(&arc) {
+                    " <-- nearby"
+                } else {
+                    ""
+                };
                 if t != u32::MAX && h != u32::MAX {
                     println!(
                         "    [{}/{}] edge {} : node {} ({:.6},{:.6}) -> node {} ({:.6},{:.6}){}",
@@ -267,7 +257,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                         marker,
                     );
                 } else {
-                    println!("    [{}/{}] edge {} (out of bounds){}", i, chain.arcs.len(), arc, marker);
+                    println!(
+                        "    [{}/{}] edge {} (out of bounds){}",
+                        i,
+                        chain.arcs.len(),
+                        arc,
+                        marker
+                    );
                 }
             }
             found_chains += 1;
@@ -291,7 +287,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             continue;
         }
 
-        println!("  Node {} ({:.6}, {:.6}):", node, lat[node as usize], lng[node as usize]);
+        println!(
+            "  Node {} ({:.6}, {:.6}):",
+            node, lat[node as usize], lng[node as usize]
+        );
         for &in_edge in &in_edges {
             let from_node = tail[in_edge as usize];
             for out_edge in start..end {

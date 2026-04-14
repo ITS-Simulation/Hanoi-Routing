@@ -47,8 +47,14 @@ pub fn run_normal(
 
         match msg {
             Ok(Some(qm)) => {
-                let resp =
-                    dispatch_normal(&mut engine, qm.request, qm.format.as_deref(), qm.colors, qm.alternatives, qm.stretch);
+                let resp = dispatch_normal(
+                    &mut engine,
+                    qm.request,
+                    qm.format.as_deref(),
+                    qm.colors,
+                    qm.alternatives,
+                    qm.stretch,
+                );
                 let _ = qm.reply.send(resp);
             }
             Ok(None) => break, // Channel closed — shutdown
@@ -89,8 +95,14 @@ pub fn run_line_graph(
 
         match msg {
             Ok(Some(qm)) => {
-                let resp =
-                    dispatch_line_graph(&mut engine, qm.request, qm.format.as_deref(), qm.colors, qm.alternatives, qm.stretch);
+                let resp = dispatch_line_graph(
+                    &mut engine,
+                    qm.request,
+                    qm.format.as_deref(),
+                    qm.colors,
+                    qm.alternatives,
+                    qm.stretch,
+                );
                 let _ = qm.reply.send(resp);
             }
             Ok(None) => break,
@@ -214,6 +226,18 @@ fn format_response(
     }
 }
 
+fn connect_query_coordinates(
+    coordinates: Vec<(f32, f32)>,
+    _origin: Option<(f32, f32)>,
+    _destination: Option<(f32, f32)>,
+) -> Vec<(f32, f32)> {
+    // Note: origin and destination are NOT appended to coordinates.
+    // The coordinates already include the clipped connector geometry
+    // (projection point + road polylines) from patch_coordinates().
+    // Appending raw user pins would create impossible paths across buildings.
+    coordinates
+}
+
 fn answer_to_response(answer: Option<QueryAnswer>, graph_type: &'static str) -> QueryResponse {
     match answer {
         Some(a) => {
@@ -227,7 +251,15 @@ fn answer_to_response(answer: Option<QueryAnswer>, graph_type: &'static str) -> 
                 turns,
                 origin,
                 destination,
+                snapped_origin: _,
+                snapped_destination: _,
             } = a;
+
+            let coord_pairs: Vec<[f32; 2]> =
+                connect_query_coordinates(coordinates, origin, destination)
+                    .into_iter()
+                    .map(|(lat, lng)| [lat, lng])
+                    .collect();
 
             QueryResponse {
                 graph_type: Some(graph_type),
@@ -236,10 +268,7 @@ fn answer_to_response(answer: Option<QueryAnswer>, graph_type: &'static str) -> 
                 path_nodes: path,
                 route_arc_ids,
                 weight_path_ids,
-                coordinates: coordinates
-                    .into_iter()
-                    .map(|(lat, lng)| [lat, lng])
-                    .collect(),
+                coordinates: coord_pairs,
                 turns,
                 origin: origin.map(|(lat, lng)| [lat, lng]),
                 destination: destination.map(|(lat, lng)| [lat, lng]),
@@ -270,10 +299,15 @@ fn answer_to_geojson(answer: Option<QueryAnswer>, colors: bool, graph_type: &'st
                 turns,
                 origin,
                 destination,
+                snapped_origin: _,
+                snapped_destination: _,
             } = a;
 
             // Convert (lat, lng) → [lng, lat] per GeoJSON spec
-            let coords: Vec<[f32; 2]> = coordinates.iter().map(|&(lat, lng)| [lng, lat]).collect();
+            let coords: Vec<[f32; 2]> = connect_query_coordinates(coordinates, origin, destination)
+                .into_iter()
+                .map(|(lat, lng)| [lng, lat])
+                .collect();
 
             let mut props = serde_json::json!({
                 "source": "hanoi_server",
@@ -332,8 +366,8 @@ fn answer_to_geojson(answer: Option<QueryAnswer>, colors: bool, graph_type: &'st
 
 /// Color palette for multi-route visualization.
 const ROUTE_COLORS: &[&str] = &[
-    "#ff5500", "#0055ff", "#00aa44", "#aa00cc", "#cc8800",
-    "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
+    "#ff5500", "#0055ff", "#00aa44", "#aa00cc", "#cc8800", "#e6194b", "#3cb44b", "#4363d8",
+    "#f58231", "#911eb4",
 ];
 
 fn format_multi_response(
@@ -354,11 +388,7 @@ fn format_multi_response(
     }
 }
 
-fn answers_to_geojson(
-    answers: Vec<QueryAnswer>,
-    colors: bool,
-    graph_type: &'static str,
-) -> Value {
+fn answers_to_geojson(answers: Vec<QueryAnswer>, colors: bool, graph_type: &'static str) -> Value {
     if answers.is_empty() {
         return serde_json::json!({
             "type": "FeatureCollection",
@@ -380,11 +410,13 @@ fn answers_to_geojson(
                 turns,
                 origin,
                 destination,
+                snapped_origin: _,
+                snapped_destination: _,
             } = a;
 
-            let coords: Vec<[f32; 2]> = coordinates
-                .iter()
-                .map(|&(lat, lng)| [lng, lat])
+            let coords: Vec<[f32; 2]> = connect_query_coordinates(coordinates, origin, destination)
+                .into_iter()
+                .map(|(lat, lng)| [lng, lat])
                 .collect();
 
             let mut props = serde_json::json!({
@@ -412,7 +444,10 @@ fn answers_to_geojson(
             if colors {
                 let color = ROUTE_COLORS[idx % ROUTE_COLORS.len()];
                 obj.insert("stroke".into(), serde_json::json!(color));
-                obj.insert("stroke-width".into(), serde_json::json!(if idx == 0 { 10 } else { 6 }));
+                obj.insert(
+                    "stroke-width".into(),
+                    serde_json::json!(if idx == 0 { 10 } else { 6 }),
+                );
                 obj.insert("fill".into(), serde_json::json!(color));
                 obj.insert("fill-opacity".into(), serde_json::json!(0.3));
             }
@@ -433,3 +468,4 @@ fn answers_to_geojson(
         "features": features
     })
 }
+

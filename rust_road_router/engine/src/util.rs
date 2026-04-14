@@ -1,6 +1,18 @@
 //! A random collection of small utilities.
 
 use std::cmp::Ordering;
+use std::convert::TryFrom;
+use std::fmt;
+use std::fs::File;
+use std::io::{self, Error, ErrorKind};
+use std::marker::PhantomData;
+use std::mem::{align_of, size_of};
+use std::ops::Deref;
+use std::path::Path;
+use std::slice;
+use std::sync::Arc;
+
+use memmap2::Mmap;
 
 pub mod in_range_option;
 
@@ -80,19 +92,142 @@ pub trait TapOps: Sized {
 
 impl<T> TapOps for T where T: Sized {}
 
-use std::convert::TryFrom;
+#[derive(Clone)]
+pub enum Storage<T> {
+    Owned(Arc<Vec<T>>),
+    Mapped { mmap: Arc<Mmap>, len: usize, _phantom: PhantomData<T> },
+}
+
+impl<T> Storage<T> {
+    pub fn from_vec(mut data: Vec<T>) -> Self {
+        data.shrink_to_fit();
+        Self::Owned(Arc::new(data))
+    }
+
+    pub fn as_slice(&self) -> &[T] {
+        match self {
+            Self::Owned(data) => data.as_slice(),
+            Self::Mapped { mmap, len, .. } => {
+                if *len == 0 {
+                    &[]
+                } else {
+                    unsafe { slice::from_raw_parts(mmap.as_ptr() as *const T, *len) }
+                }
+            }
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.as_slice().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn to_vec(&self) -> Vec<T>
+    where
+        T: Clone,
+    {
+        self.as_slice().to_vec()
+    }
+}
+
+impl<T: Copy> Storage<T> {
+    pub fn mmap(path: impl AsRef<Path>) -> io::Result<Self> {
+        if size_of::<T>() == 0 {
+            return Err(Error::new(ErrorKind::InvalidData, "zero-sized types cannot be memory-mapped"));
+        }
+
+        let file = File::open(path.as_ref())?;
+        let metadata = file.metadata()?;
+        let num_bytes = usize::try_from(metadata.len()).map_err(|_| {
+            Error::new(
+                ErrorKind::InvalidData,
+                format!("file too large to map on this platform: {}", path.as_ref().display()),
+            )
+        })?;
+
+        if num_bytes == 0 {
+            return Ok(Self::from_vec(Vec::new()));
+        }
+
+        if num_bytes % size_of::<T>() != 0 {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                format!(
+                    "file size {} is not a multiple of element size {} for {}",
+                    num_bytes,
+                    size_of::<T>(),
+                    path.as_ref().display()
+                ),
+            ));
+        }
+
+        let mmap = unsafe { Mmap::map(&file) }?;
+        if !(mmap.as_ptr() as usize).is_multiple_of(align_of::<T>()) {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                format!("mmap for {} is not aligned for {}-byte elements", path.as_ref().display(), align_of::<T>()),
+            ));
+        }
+
+        Ok(Self::Mapped {
+            mmap: Arc::new(mmap),
+            len: num_bytes / size_of::<T>(),
+            _phantom: PhantomData,
+        })
+    }
+}
+
+impl<T> AsRef<[T]> for Storage<T> {
+    fn as_ref(&self) -> &[T] {
+        self.as_slice()
+    }
+}
+
+impl<T> Deref for Storage<T> {
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
+        self.as_slice()
+    }
+}
+
+impl<T> fmt::Debug for Storage<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Owned(data) => f.debug_struct("Storage").field("kind", &"owned").field("len", &data.len()).finish(),
+            Self::Mapped { len, .. } => f.debug_struct("Storage").field("kind", &"mapped").field("len", len).finish(),
+        }
+    }
+}
+
+impl<T: PartialEq> PartialEq for Storage<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+
+impl<T: Eq> Eq for Storage<T> {}
+
+impl<T: PartialEq> PartialEq<Vec<T>> for Storage<T> {
+    fn eq(&self, other: &Vec<T>) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
 
 #[derive(Clone)]
 pub struct Vecs<T> {
-    first_idx: Vec<usize>,
-    data: Vec<T>,
+    first_idx: Storage<u32>,
+    data: Storage<T>,
 }
 
 impl<T> Vecs<T> {
     pub fn empty() -> Self {
         Self {
-            first_idx: vec![0],
-            data: Vec::new(),
+            first_idx: Storage::from_vec(vec![0]),
+            data: Storage::from_vec(Vec::new()),
         }
     }
 
@@ -103,14 +238,49 @@ impl<T> Vecs<T> {
 
         for iter in iters {
             data.extend(iter);
-            first_idx.push(data.len());
+            first_idx.push(u32::try_from(data.len()).expect("Vecs::from_iters data length exceeds u32::MAX"));
         }
 
-        Self { first_idx, data }
+        Self {
+            first_idx: Storage::from_vec(first_idx),
+            data: Storage::from_vec(data),
+        }
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &[T]> {
-        self.first_idx.array_windows::<2>().map(|&[from, to]| &self.data[from..to])
+        self.first_idx.array_windows::<2>().map(|&[from, to]| &self.data[from as usize..to as usize])
+    }
+
+    pub fn first_idx_as_u32(&self) -> Vec<u32> {
+        self.first_idx.as_slice().to_vec()
+    }
+
+    pub fn data_as_slice(&self) -> &[T] {
+        self.data.as_slice()
+    }
+
+    pub fn from_raw(first_idx: Vec<u32>, data: Vec<T>) -> std::io::Result<Self> {
+        Self::from_storage(Storage::from_vec(first_idx), Storage::from_vec(data))
+    }
+
+    pub fn from_storage(first_idx: Storage<u32>, data: Storage<T>) -> std::io::Result<Self> {
+        let check = |cond: bool, msg: &str| -> std::io::Result<()> {
+            if cond {
+                Ok(())
+            } else {
+                Err(std::io::Error::new(std::io::ErrorKind::InvalidData, msg.to_string()))
+            }
+        };
+
+        let idx = first_idx.as_slice();
+        check(!idx.is_empty(), "Vecs first_idx must be non-empty")?;
+        check(idx[0] == 0, "Vecs first_idx must start at 0")?;
+        check(*idx.last().unwrap() as usize == data.len(), "Vecs first_idx last entry must equal data.len()")?;
+        for window in idx.windows(2) {
+            check(window[0] <= window[1], "Vecs first_idx must be monotonically non-decreasing")?;
+        }
+
+        Ok(Vecs { first_idx, data })
     }
 }
 
@@ -118,17 +288,17 @@ use rayon::prelude::*;
 
 impl<T> Vecs<T>
 where
-    T: Sync,
+    T: Sync + Send,
 {
     pub fn par_iter(&self) -> impl IndexedParallelIterator<Item = &[T]> {
-        self.first_idx.par_windows(2).map(|idxs| &self.data[idxs[0]..idxs[1]])
+        self.first_idx.par_windows(2).map(|idxs| &self.data[idxs[0] as usize..idxs[1] as usize])
     }
 }
 
 impl<T> std::ops::Index<usize> for Vecs<T> {
     type Output = [T];
     fn index(&self, idx: usize) -> &<Self as std::ops::Index<usize>>::Output {
-        &self.data[SlcsIdx(&self.first_idx).range(idx)]
+        &self.data[SlcsIdx(self.first_idx.as_slice()).range(idx)]
     }
 }
 

@@ -3,6 +3,7 @@ use serde_json::{Map, Value};
 
 use hanoi_core::cch::{CchContext, route_distance_m};
 use hanoi_core::line_graph::LineGraphCchContext;
+use rust_road_router::util::Storage;
 
 use crate::types::{EvaluateRouteInput, RouteEvaluationResult};
 
@@ -45,8 +46,8 @@ impl RouteEvaluator {
 }
 
 pub(crate) struct NormalRouteEvaluator {
-    first_out: Vec<u32>,
-    head: Vec<u32>,
+    first_out: Storage<u32>,
+    head: Storage<u32>,
     arc_lengths_m: Vec<f64>,
 }
 
@@ -143,14 +144,13 @@ impl NormalRouteEvaluator {
 }
 
 pub(crate) struct LineGraphRouteEvaluator {
-    original_first_out: Vec<u32>,
-    original_head: Vec<u32>,
+    original_first_out: Storage<u32>,
+    original_head: Storage<u32>,
     original_arc_lengths_m: Vec<f64>,
-    original_arc_id_of_lg_node: Vec<u32>,
-    original_travel_time_by_lg_node: Vec<Weight>,
-    line_graph_first_out: Vec<u32>,
-    line_graph_head: Vec<u32>,
-    baseline_original_arc_weights: Vec<Weight>,
+    original_arc_id_of_lg_node: Storage<u32>,
+    line_graph_first_out: Storage<u32>,
+    line_graph_head: Storage<u32>,
+    baseline_original_arc_weights: Storage<Weight>,
     incoming_offsets: Vec<u32>,
     incoming_edges: Vec<u32>,
 }
@@ -158,8 +158,6 @@ pub(crate) struct LineGraphRouteEvaluator {
 impl LineGraphRouteEvaluator {
     fn new(context: &LineGraphCchContext) -> Self {
         let original_edge_count = context.original_first_out.last().copied().unwrap_or(0) as usize;
-        let baseline_original_arc_weights =
-            context.original_travel_time[..original_edge_count].to_vec();
         let (incoming_offsets, incoming_edges) =
             build_incoming_index(&context.graph.head, original_edge_count);
 
@@ -173,10 +171,9 @@ impl LineGraphRouteEvaluator {
                 &context.original_longitude,
             ),
             original_arc_id_of_lg_node: context.original_arc_id_of_lg_node.clone(),
-            original_travel_time_by_lg_node: context.original_travel_time.clone(),
             line_graph_first_out: context.graph.first_out.clone(),
             line_graph_head: context.graph.head.clone(),
-            baseline_original_arc_weights,
+            baseline_original_arc_weights: context.original_travel_time.clone(),
             incoming_offsets,
             incoming_edges,
         }
@@ -315,13 +312,22 @@ impl LineGraphRouteEvaluator {
         }
 
         let first_node = weight_path_ids[0] as usize;
-        let mut total = *self
-            .original_travel_time_by_lg_node
+        let first_arc = *self
+            .original_arc_id_of_lg_node
             .get(first_node)
             .ok_or_else(|| {
                 format!(
                     "weight_path_ids contains line-graph node {} outside the loaded dataset",
                     weight_path_ids[0]
+                )
+            })?;
+        let mut total = *self
+            .baseline_original_arc_weights
+            .get(first_arc as usize)
+            .ok_or_else(|| {
+                format!(
+                    "weight_path_ids first node {} maps to original arc {} outside the loaded dataset",
+                    weight_path_ids[0], first_arc
                 )
             })?;
 

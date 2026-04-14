@@ -2,7 +2,10 @@
 
 use super::*;
 use crate::{
-    datastr::{graph::first_out_graph::BorrowedGraph, node_order::NodeOrder},
+    datastr::{
+        graph::first_out_graph::BorrowedGraph,
+        node_order::{NodeOrder, Rank},
+    },
     io::*,
     report::{benchmark::*, block_reporting},
     util::{in_range_option::InRangeOption, *},
@@ -202,16 +205,16 @@ impl CCH {
         let backward_inverted = ReversedGraphWithEdgeIds::reversed(&UnweightedFirstOutGraph::new(&backward_first_out[..], &backward_head[..]));
 
         DirectedCCH {
-            forward_first_out,
-            forward_head,
-            forward_tail,
-            backward_first_out,
-            backward_head,
-            backward_tail,
+            forward_first_out: Storage::from_vec(forward_first_out),
+            forward_head: Storage::from_vec(forward_head),
+            forward_tail: Storage::from_vec(forward_tail),
+            backward_first_out: Storage::from_vec(backward_first_out),
+            backward_head: Storage::from_vec(backward_head),
+            backward_tail: Storage::from_vec(backward_tail),
             node_order: self.node_order.clone(),
             forward_cch_edge_to_orig_arc,
             backward_cch_edge_to_orig_arc,
-            elimination_tree: self.elimination_tree.clone(),
+            elimination_tree: Storage::from_vec(self.elimination_tree.clone()),
             forward_inverted,
             backward_inverted,
             separator_tree: self.separator_tree.clone(),
@@ -603,17 +606,250 @@ impl<'a, C: CCHT> crate::io::ReconstructPrepared<CustomizedPerfect<'a, C>> for &
     }
 }
 
+fn cache_check(cond: bool, msg: impl Into<String>) -> std::io::Result<()> {
+    if cond {
+        Ok(())
+    } else {
+        Err(std::io::Error::new(std::io::ErrorKind::InvalidData, msg.into()))
+    }
+}
+
+impl crate::io::Deconstruct for DirectedCCH {
+    fn save_each(&self, store: &dyn Fn(&str, &dyn crate::io::Save) -> std::io::Result<()>) -> std::io::Result<()> {
+        store("directed_fw_first_out", &&self.forward_first_out[..])?;
+        store("directed_fw_head", &&self.forward_head[..])?;
+        store("directed_fw_tail", &&self.forward_tail[..])?;
+        store("directed_bw_first_out", &&self.backward_first_out[..])?;
+        store("directed_bw_head", &&self.backward_head[..])?;
+        store("directed_bw_tail", &&self.backward_tail[..])?;
+
+        let fw_edge_to_orig_idx = self.forward_cch_edge_to_orig_arc.first_idx_as_u32();
+        store("fw_edge_to_orig_idx", &fw_edge_to_orig_idx)?;
+        let fw_edge_to_orig_data: Vec<u32> = self.forward_cch_edge_to_orig_arc.data_as_slice().iter().map(|&EdgeIdT(x)| x).collect();
+        store("fw_edge_to_orig_data", &fw_edge_to_orig_data)?;
+
+        let bw_edge_to_orig_idx = self.backward_cch_edge_to_orig_arc.first_idx_as_u32();
+        store("bw_edge_to_orig_idx", &bw_edge_to_orig_idx)?;
+        let bw_edge_to_orig_data: Vec<u32> = self.backward_cch_edge_to_orig_arc.data_as_slice().iter().map(|&EdgeIdT(x)| x).collect();
+        store("bw_edge_to_orig_data", &bw_edge_to_orig_data)?;
+
+        store("fw_inverted_first_out", &self.forward_inverted.first_out())?;
+        store("fw_inverted_head", &self.forward_inverted.head_slice())?;
+        store("fw_inverted_edge_ids", &self.forward_inverted.edge_ids())?;
+        store("bw_inverted_first_out", &self.backward_inverted.first_out())?;
+        store("bw_inverted_head", &self.backward_inverted.head_slice())?;
+        store("bw_inverted_edge_ids", &self.backward_inverted.edge_ids())?;
+
+        let elimination_tree: Vec<u32> = self.elimination_tree.iter().map(|opt| opt.value().unwrap_or(u32::MAX)).collect();
+        store("elimination_tree", &elimination_tree)?;
+        self.node_order.save_each(&|name, data| store(name, data))?;
+
+        Ok(())
+    }
+}
+
+pub struct DirectedCCHReconstructor;
+
+impl crate::io::ReconstructPrepared<DirectedCCH> for DirectedCCHReconstructor {
+    fn reconstruct_with(self, loader: Loader) -> std::io::Result<DirectedCCH> {
+        let forward_first_out = Storage::<EdgeId>::mmap(loader.path().join("directed_fw_first_out"))?;
+        let forward_head = Storage::<NodeId>::mmap(loader.path().join("directed_fw_head"))?;
+        let forward_tail = Storage::<NodeId>::mmap(loader.path().join("directed_fw_tail"))?;
+        let backward_first_out = Storage::<EdgeId>::mmap(loader.path().join("directed_bw_first_out"))?;
+        let backward_head = Storage::<NodeId>::mmap(loader.path().join("directed_bw_head"))?;
+        let backward_tail = Storage::<NodeId>::mmap(loader.path().join("directed_bw_tail"))?;
+
+        cache_check(!forward_first_out.is_empty(), "fw first_out empty")?;
+        cache_check(*forward_first_out.first().unwrap() == 0, "fw first_out[0] != 0")?;
+        cache_check(
+            *forward_first_out.last().unwrap() as usize == forward_head.len(),
+            format!(
+                "fw first_out sentinel ({}) != head.len ({})",
+                forward_first_out.last().unwrap(),
+                forward_head.len()
+            ),
+        )?;
+        for window in forward_first_out.windows(2) {
+            cache_check(window[0] <= window[1], "fw first_out not monotonically non-decreasing")?;
+        }
+        cache_check(forward_head.len() == forward_tail.len(), "fw head.len != tail.len")?;
+
+        cache_check(!backward_first_out.is_empty(), "bw first_out empty")?;
+        cache_check(*backward_first_out.first().unwrap() == 0, "bw first_out[0] != 0")?;
+        cache_check(
+            *backward_first_out.last().unwrap() as usize == backward_head.len(),
+            format!(
+                "bw first_out sentinel ({}) != head.len ({})",
+                backward_first_out.last().unwrap(),
+                backward_head.len()
+            ),
+        )?;
+        for window in backward_first_out.windows(2) {
+            cache_check(window[0] <= window[1], "bw first_out not monotonically non-decreasing")?;
+        }
+        cache_check(backward_head.len() == backward_tail.len(), "bw head.len != tail.len")?;
+        cache_check(
+            forward_first_out.len() == backward_first_out.len(),
+            "fw/bw first_out length mismatch (different num_nodes)",
+        )?;
+
+        let num_nodes = forward_first_out.len() - 1;
+        let num_fw_edges = forward_head.len();
+        let num_bw_edges = backward_head.len();
+
+        for &head in forward_head.iter() {
+            cache_check((head as usize) < num_nodes, format!("fw head value {} >= num_nodes {}", head, num_nodes))?;
+        }
+        for &tail in forward_tail.iter() {
+            cache_check((tail as usize) < num_nodes, format!("fw tail value {} >= num_nodes {}", tail, num_nodes))?;
+        }
+        for &head in backward_head.iter() {
+            cache_check((head as usize) < num_nodes, format!("bw head value {} >= num_nodes {}", head, num_nodes))?;
+        }
+        for &tail in backward_tail.iter() {
+            cache_check((tail as usize) < num_nodes, format!("bw tail value {} >= num_nodes {}", tail, num_nodes))?;
+        }
+
+        let fw_idx = Storage::<u32>::mmap(loader.path().join("fw_edge_to_orig_idx"))?;
+        let fw_data = Storage::<EdgeIdT>::mmap(loader.path().join("fw_edge_to_orig_data"))?;
+        cache_check(
+            fw_idx.len() == num_fw_edges + 1,
+            format!("fw_edge_to_orig_idx.len ({}) != num_fw_edges+1 ({})", fw_idx.len(), num_fw_edges + 1),
+        )?;
+        let forward_cch_edge_to_orig_arc = Vecs::from_storage(fw_idx, fw_data)?;
+
+        let bw_idx = Storage::<u32>::mmap(loader.path().join("bw_edge_to_orig_idx"))?;
+        let bw_data = Storage::<EdgeIdT>::mmap(loader.path().join("bw_edge_to_orig_data"))?;
+        cache_check(
+            bw_idx.len() == num_bw_edges + 1,
+            format!("bw_edge_to_orig_idx.len ({}) != num_bw_edges+1 ({})", bw_idx.len(), num_bw_edges + 1),
+        )?;
+        let backward_cch_edge_to_orig_arc = Vecs::from_storage(bw_idx, bw_data)?;
+
+        let fw_inv_first_out = Storage::<EdgeId>::mmap(loader.path().join("fw_inverted_first_out"))?;
+        let fw_inv_head = Storage::<NodeId>::mmap(loader.path().join("fw_inverted_head"))?;
+        let fw_inv_edge_ids = Storage::<EdgeId>::mmap(loader.path().join("fw_inverted_edge_ids"))?;
+        cache_check(
+            fw_inv_first_out.len() == num_nodes + 1,
+            format!("fw_inverted first_out.len ({}) != num_nodes+1 ({})", fw_inv_first_out.len(), num_nodes + 1),
+        )?;
+        cache_check(
+            fw_inv_head.len() == num_fw_edges,
+            format!("fw_inverted head.len ({}) != num_fw_edges ({})", fw_inv_head.len(), num_fw_edges),
+        )?;
+        for &head in fw_inv_head.iter() {
+            cache_check(
+                (head as usize) < num_nodes,
+                format!("fw_inverted head value {} >= num_nodes {}", head, num_nodes),
+            )?;
+        }
+        cache_check(
+            fw_inv_edge_ids.len() == num_fw_edges,
+            format!("fw_inverted edge_ids.len ({}) != num_fw_edges ({})", fw_inv_edge_ids.len(), num_fw_edges),
+        )?;
+        for &edge_id in fw_inv_edge_ids.iter() {
+            cache_check(
+                (edge_id as usize) < num_fw_edges,
+                format!("fw_inverted edge_id {} >= num_fw_edges {}", edge_id, num_fw_edges),
+            )?;
+        }
+        let forward_inverted = ReversedGraphWithEdgeIds::from_storage_validated(fw_inv_first_out, fw_inv_head, fw_inv_edge_ids)?;
+
+        let bw_inv_first_out = Storage::<EdgeId>::mmap(loader.path().join("bw_inverted_first_out"))?;
+        let bw_inv_head = Storage::<NodeId>::mmap(loader.path().join("bw_inverted_head"))?;
+        let bw_inv_edge_ids = Storage::<EdgeId>::mmap(loader.path().join("bw_inverted_edge_ids"))?;
+        cache_check(
+            bw_inv_first_out.len() == num_nodes + 1,
+            format!("bw_inverted first_out.len ({}) != num_nodes+1 ({})", bw_inv_first_out.len(), num_nodes + 1),
+        )?;
+        cache_check(
+            bw_inv_head.len() == num_bw_edges,
+            format!("bw_inverted head.len ({}) != num_bw_edges ({})", bw_inv_head.len(), num_bw_edges),
+        )?;
+        for &head in bw_inv_head.iter() {
+            cache_check(
+                (head as usize) < num_nodes,
+                format!("bw_inverted head value {} >= num_nodes {}", head, num_nodes),
+            )?;
+        }
+        cache_check(
+            bw_inv_edge_ids.len() == num_bw_edges,
+            format!("bw_inverted edge_ids.len ({}) != num_bw_edges ({})", bw_inv_edge_ids.len(), num_bw_edges),
+        )?;
+        for &edge_id in bw_inv_edge_ids.iter() {
+            cache_check(
+                (edge_id as usize) < num_bw_edges,
+                format!("bw_inverted edge_id {} >= num_bw_edges {}", edge_id, num_bw_edges),
+            )?;
+        }
+        let backward_inverted = ReversedGraphWithEdgeIds::from_storage_validated(bw_inv_first_out, bw_inv_head, bw_inv_edge_ids)?;
+
+        let elimination_tree = Storage::<InRangeOption<NodeId>>::mmap(loader.path().join("elimination_tree"))?;
+        cache_check(
+            elimination_tree.len() == num_nodes,
+            format!("elimination_tree.len ({}) != num_nodes ({})", elimination_tree.len(), num_nodes),
+        )?;
+        for parent in elimination_tree.iter() {
+            if let Some(parent) = parent.value() {
+                cache_check(
+                    (parent as usize) < num_nodes,
+                    format!("elimination_tree parent {} >= num_nodes {}", parent, num_nodes),
+                )?;
+            }
+        }
+
+        let raw_ranks = Storage::<Rank>::mmap(loader.path().join("ranks"))?;
+        cache_check(
+            raw_ranks.len() == num_nodes,
+            format!("ranks.len ({}) != num_nodes ({})", raw_ranks.len(), num_nodes),
+        )?;
+        let mut seen = vec![false; num_nodes];
+        for &rank in raw_ranks.iter() {
+            cache_check((rank as usize) < num_nodes, format!("ranks contains out-of-range value {}", rank))?;
+            cache_check(!seen[rank as usize], format!("ranks contains duplicate value {}", rank))?;
+            seen[rank as usize] = true;
+        }
+        let node_order = NodeOrder::from_ranks_storage(raw_ranks);
+
+        for (node, parent) in elimination_tree.iter().enumerate() {
+            if let Some(parent) = parent.value() {
+                cache_check(
+                    (parent as usize) > node,
+                    format!("elimination_tree[{}] = {} — parent must have higher rank than child", node, parent),
+                )?;
+            }
+        }
+        let separator_tree = SeparatorTree::new(&elimination_tree);
+
+        Ok(DirectedCCH {
+            forward_first_out,
+            forward_head,
+            forward_tail,
+            backward_first_out,
+            backward_head,
+            backward_tail,
+            node_order,
+            forward_cch_edge_to_orig_arc,
+            backward_cch_edge_to_orig_arc,
+            elimination_tree,
+            forward_inverted,
+            backward_inverted,
+            separator_tree,
+        })
+    }
+}
+
 pub struct DirectedCCH {
-    forward_first_out: Vec<EdgeId>,
-    forward_head: Vec<NodeId>,
-    forward_tail: Vec<NodeId>,
-    backward_first_out: Vec<EdgeId>,
-    backward_head: Vec<NodeId>,
-    backward_tail: Vec<NodeId>,
+    forward_first_out: Storage<EdgeId>,
+    forward_head: Storage<NodeId>,
+    forward_tail: Storage<NodeId>,
+    backward_first_out: Storage<EdgeId>,
+    backward_head: Storage<NodeId>,
+    backward_tail: Storage<NodeId>,
     node_order: NodeOrder,
     forward_cch_edge_to_orig_arc: Vecs<EdgeIdT>,
     backward_cch_edge_to_orig_arc: Vecs<EdgeIdT>,
-    elimination_tree: Vec<InRangeOption<NodeId>>,
+    elimination_tree: Storage<InRangeOption<NodeId>>,
     forward_inverted: ReversedGraphWithEdgeIds,
     backward_inverted: ReversedGraphWithEdgeIds,
     separator_tree: SeparatorTree,
@@ -627,22 +863,22 @@ impl DirectedCCH {
 
 impl CCHT for DirectedCCH {
     fn forward_first_out(&self) -> &[EdgeId] {
-        &self.forward_first_out[..]
+        self.forward_first_out.as_slice()
     }
     fn backward_first_out(&self) -> &[EdgeId] {
-        &self.backward_first_out[..]
+        self.backward_first_out.as_slice()
     }
     fn forward_head(&self) -> &[NodeId] {
-        &self.forward_head[..]
+        self.forward_head.as_slice()
     }
     fn backward_head(&self) -> &[NodeId] {
-        &self.backward_head[..]
+        self.backward_head.as_slice()
     }
     fn forward_tail(&self) -> &[NodeId] {
-        &self.forward_tail[..]
+        self.forward_tail.as_slice()
     }
     fn backward_tail(&self) -> &[NodeId] {
-        &self.backward_tail[..]
+        self.backward_tail.as_slice()
     }
     fn forward_inverted(&self) -> &ReversedGraphWithEdgeIds {
         &self.forward_inverted
@@ -662,7 +898,7 @@ impl CCHT for DirectedCCH {
     }
 
     fn elimination_tree(&self) -> &[InRangeOption<NodeId>] {
-        &self.elimination_tree[..]
+        self.elimination_tree.as_slice()
     }
 
     fn separators(&self) -> &SeparatorTree {

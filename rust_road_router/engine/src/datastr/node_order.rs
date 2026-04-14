@@ -2,8 +2,7 @@
 
 use crate::datastr::graph::*;
 use crate::io::*;
-
-use std::sync::Arc;
+use crate::util::Storage;
 
 pub type Rank = NodeId;
 
@@ -13,17 +12,17 @@ pub type Rank = NodeId;
 #[derive(Debug, Clone)]
 pub struct NodeOrder {
     // NodeIds ordered by their ranks - that is ascending in importance
-    node_order: Arc<[NodeId]>,
+    node_order: Storage<NodeId>,
     // The rank of each node - 0 is the lowest importance, n-1 the highest
-    ranks: Arc<[Rank]>,
+    ranks: Storage<Rank>,
 }
 
 impl NodeOrder {
     /// Create a `NodeOrder` where the id is equal to the rank
     pub fn identity(n: usize) -> NodeOrder {
         NodeOrder {
-            node_order: (0..n as u32).collect(),
-            ranks: (0..n as u32).collect(),
+            node_order: Storage::from_vec((0..n as u32).collect()),
+            ranks: Storage::from_vec((0..n as u32).collect()),
         }
     }
 
@@ -40,13 +39,17 @@ impl NodeOrder {
         debug_assert_eq!(ranks.iter().position(|&rank| rank == n as Rank), None);
 
         NodeOrder {
-            node_order: node_order.into(),
-            ranks: ranks.into(),
+            node_order: Storage::from_vec(node_order),
+            ranks: Storage::from_vec(ranks),
         }
     }
 
     /// Create a `NodeOrder` from a rank vector, that is a vector where `rank[id]` contains the rank for node `id`
     pub fn from_ranks(ranks: Vec<Rank>) -> NodeOrder {
+        Self::from_ranks_storage(Storage::from_vec(ranks))
+    }
+
+    pub fn from_ranks_storage(ranks: Storage<Rank>) -> NodeOrder {
         let n = ranks.len();
         assert!(n < <NodeId>::max_value() as usize);
         let mut node_order = vec![n as NodeId; n];
@@ -58,19 +61,19 @@ impl NodeOrder {
         debug_assert_eq!(node_order.iter().position(|&node| node == n as NodeId), None);
 
         NodeOrder {
-            node_order: node_order.into(),
-            ranks: ranks.into(),
+            node_order: Storage::from_vec(node_order),
+            ranks,
         }
     }
 
     /// Get node order (rank -> node) as a slice
     pub fn order(&self) -> &[NodeId] {
-        &self.node_order
+        self.node_order.as_slice()
     }
 
     /// Get node ranks (node -> rank) as a slice
     pub fn ranks(&self) -> &[NodeId] {
-        &self.ranks
+        self.ranks.as_slice()
     }
 
     /// Get rank for a given node

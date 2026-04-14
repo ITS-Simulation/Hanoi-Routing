@@ -24,8 +24,10 @@ pub type Weight = u32;
 /// Set to `u32::MAX / 2` so that `INFINITY + x` for `x <= INFINITY` does not overflow.
 pub const INFINITY: Weight = std::u32::MAX / 2;
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NodeIdT(pub NodeId);
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EdgeIdT(pub EdgeId);
 
@@ -35,6 +37,7 @@ impl Default for EdgeIdT {
     }
 }
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Reversed(pub EdgeIdT);
 

@@ -2,6 +2,7 @@
 
 pub mod bounds;
 pub mod cch;
+mod cch_cache;
 pub mod geometry;
 pub mod graph;
 pub mod line_graph;

@@ -27,6 +27,49 @@ const QUERY_ROUTE_COLORS = [
   "#2f6fed",
 ];
 const QUERY_ROUTE_LABELS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+const MEASURE_LINE_COLOR = "#c17712";
+const MEASURE_START_COLOR = "#0b7db5";
+const MEASURE_MID_COLOR = "#597086";
+const BASE_MAP_FLAVORS = {
+  simple_light: {
+    label: "Simple Light",
+    description:
+      "Simple Light is active. A low-clutter basemap inspired by the clean editing feel of geojson.io.",
+    tileUrl: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+    options: {
+      maxZoom: 20,
+      subdomains: "abcd",
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors ' +
+        '&copy; <a href="https://carto.com/attributions">CARTO</a>',
+    },
+  },
+  balanced_streets: {
+    label: "Balanced Streets",
+    description:
+      "Balanced Streets is active. More street and neighborhood context, while staying cleaner than the default OSM raster.",
+    tileUrl:
+      "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+    options: {
+      maxZoom: 20,
+      subdomains: "abcd",
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors ' +
+        '&copy; <a href="https://carto.com/attributions">CARTO</a>',
+    },
+  },
+  classic_osm: {
+    label: "Classic OSM",
+    description:
+      "Classic OSM is active. Dense, familiar OpenStreetMap cartography with the fullest local detail.",
+    tileUrl: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    options: {
+      maxZoom: 19,
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    },
+  },
+};
 
 const TURN_LABELS = {
   straight: "Continue straight",
@@ -37,14 +80,11 @@ const TURN_LABELS = {
   sharp_left: "Sharp left",
   sharp_right: "Sharp right",
   u_turn: "Make a U-turn",
-  roundabout_straight: "Roundabout, continue through",
-  roundabout_slight_left: "Roundabout, slight left exit",
-  roundabout_slight_right: "Roundabout, slight right exit",
-  roundabout_left: "Roundabout, take the left exit",
-  roundabout_right: "Roundabout, take the right exit",
-  roundabout_sharp_left: "Roundabout, sharp left exit",
-  roundabout_sharp_right: "Roundabout, sharp right exit",
-  roundabout_u_turn: "Roundabout, loop back",
+  roundabout_enter: "Enter roundabout",
+  roundabout_exit_straight: "Roundabout, go straight",
+  roundabout_exit_right: "Roundabout, turn right",
+  roundabout_exit_left: "Roundabout, turn left",
+  roundabout_exit_uturn: "Roundabout, U-turn",
 };
 
 const state = loadState();
@@ -72,6 +112,12 @@ let compareRoutes = [];
 let compareRouteIdCounter = 0;
 let activeQueryRouteIndex = 0;
 let lastQueryLatencyMs = null;
+let activeMapTool = "query";
+let measurePathPoints = [];
+let measureLineLayer = null;
+let measurePointLayerGroup = null;
+let activeBaseMapFlavor = "simple_light";
+let activeBaseMapLayer = null;
 
 const elements = {
   legendCard: document.getElementById("legend-card"),
@@ -84,6 +130,19 @@ const elements = {
   workspaceQueryBtn: document.getElementById("workspace-query-btn"),
   workspaceCompareBtn: document.getElementById("workspace-compare-btn"),
   workspaceCaption: document.getElementById("workspace-caption"),
+  baseMapStatus: document.getElementById("base-map-status"),
+  baseMapSimpleBtn: document.getElementById("base-map-simple-btn"),
+  baseMapBalancedBtn: document.getElementById("base-map-balanced-btn"),
+  baseMapOsmBtn: document.getElementById("base-map-osm-btn"),
+  mapToolQueryBtn: document.getElementById("map-tool-query-btn"),
+  mapToolMeasureBtn: document.getElementById("map-tool-measure-btn"),
+  measureModeChip: document.getElementById("measure-mode-chip"),
+  measureDistance: document.getElementById("measure-distance"),
+  measureSegments: document.getElementById("measure-segments"),
+  measurePoints: document.getElementById("measure-points"),
+  measureStatus: document.getElementById("measure-status"),
+  measureUndoBtn: document.getElementById("measure-undo-btn"),
+  measureClearBtn: document.getElementById("measure-clear-btn"),
   queryPanel: document.getElementById("query-panel"),
   comparePanel: document.getElementById("compare-panel"),
   pickFromBtn: document.getElementById("pick-from-btn"),
@@ -139,7 +198,9 @@ const elements = {
   cameraToggleBtn: document.getElementById("camera-toggle-btn"),
   cameraOverlayStatus: document.getElementById("camera-overlay-status"),
   trafficToggleBtn: document.getElementById("traffic-toggle-btn"),
-  trafficTertiaryFilterInput: document.getElementById("traffic-tertiary-filter-input"),
+  trafficTertiaryFilterInput: document.getElementById(
+    "traffic-tertiary-filter-input",
+  ),
   trafficOverlayStatus: document.getElementById("traffic-overlay-status"),
   summaryFrom: document.getElementById("summary-from"),
   summaryTo: document.getElementById("summary-to"),
@@ -155,10 +216,17 @@ const elements = {
 
 document.addEventListener("DOMContentLoaded", async () => {
   initMap();
+  initMeasurementTool();
+  initBaseMapFlavor();
   bindEvents();
+  bindBaseMapEvents();
+  bindMeasurementEvents();
   renderInputs();
   renderSidebarState();
+  renderBaseMapState();
   renderQueryModeState();
+  renderMapToolState();
+  renderMeasureState();
   renderLegendCardState();
   renderModeState();
   renderMarkers();
@@ -206,13 +274,22 @@ function loadState() {
     return {
       activeTab: parsed.activeTab === "compare" ? "compare" : "query",
       compareView: parsed.compareView === "focus" ? "focus" : "all",
-      focusRouteAId: typeof parsed.focusRouteAId === "string" ? parsed.focusRouteAId : "",
-      focusRouteBId: typeof parsed.focusRouteBId === "string" ? parsed.focusRouteBId : "",
+      focusRouteAId:
+        typeof parsed.focusRouteAId === "string" ? parsed.focusRouteAId : "",
+      focusRouteBId:
+        typeof parsed.focusRouteBId === "string" ? parsed.focusRouteBId : "",
       activeTarget: parsed.activeTarget === "to" ? "to" : "from",
-      queryView: parsed.queryView === "routes" || parsed.queryView === "turns" ? parsed.queryView : "build",
+      queryView:
+        parsed.queryView === "routes" || parsed.queryView === "turns"
+          ? parsed.queryView
+          : "build",
       queryMode: parsed.queryMode === "multi" ? "multi" : "single",
-      queryAlternatives: typeof parsed.queryAlternatives === "string" ? parsed.queryAlternatives : "5",
-      queryStretch: typeof parsed.queryStretch === "string" ? parsed.queryStretch : "1.3",
+      queryAlternatives:
+        typeof parsed.queryAlternatives === "string"
+          ? parsed.queryAlternatives
+          : "5",
+      queryStretch:
+        typeof parsed.queryStretch === "string" ? parsed.queryStretch : "1.3",
       fromLat: typeof parsed.fromLat === "string" ? parsed.fromLat : "",
       fromLng: typeof parsed.fromLng === "string" ? parsed.fromLng : "",
       toLat: typeof parsed.toLat === "string" ? parsed.toLat : "",
@@ -257,7 +334,8 @@ function initMap() {
 
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    attribution:
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   }).addTo(map);
 
   map.setView(DEFAULT_CENTER, DEFAULT_ZOOM);
@@ -277,12 +355,12 @@ function initMap() {
 
   routeHaloLayer = L.geoJSON(null, {
     pane: "routeHalo",
-    style: (feature) => buildQueryRouteStyle(feature, { halo: true }),
+    style: feature => buildQueryRouteStyle(feature, { halo: true }),
   }).addTo(map);
 
   routeLineLayer = L.geoJSON(null, {
     pane: "routeLine",
-    style: (feature) => buildQueryRouteStyle(feature, { halo: false }),
+    style: feature => buildQueryRouteStyle(feature, { halo: false }),
     onEachFeature: bindQueryRouteFeature,
   }).addTo(map);
 
@@ -297,30 +375,72 @@ function initMap() {
   });
 }
 
+function initMeasurementTool() {
+  map.createPane("measurementLine");
+  map.getPane("measurementLine").style.zIndex = "432";
+  map.createPane("measurementPoint");
+  map.getPane("measurementPoint").style.zIndex = "433";
+
+  measureLineLayer = L.polyline([], {
+    pane: "measurementLine",
+    className: "measure-line",
+    color: MEASURE_LINE_COLOR,
+    weight: 5,
+    opacity: 0.92,
+    lineCap: "round",
+    lineJoin: "round",
+  }).addTo(map);
+
+  measurePointLayerGroup = L.layerGroup().addTo(map);
+}
+
 function bindEvents() {
   elements.legendCollapseBtn.addEventListener("click", handleLegendCollapse);
   elements.sidebarCollapseBtn.addEventListener("click", toggleSidebarCollapsed);
-  elements.sidebarPeekBtn.addEventListener("click", () => setSidebarCollapsed(false));
+  elements.sidebarPeekBtn.addEventListener("click", () =>
+    setSidebarCollapsed(false),
+  );
   elements.queryForm.addEventListener("submit", handleQuerySubmit);
   elements.refreshServerBtn.addEventListener("click", refreshServerContext);
   elements.resetWeightsBtn.addEventListener("click", handleResetWeights);
-  elements.workspaceQueryBtn.addEventListener("click", () => setActiveTab("query"));
-  elements.workspaceCompareBtn.addEventListener("click", () => setActiveTab("compare"));
-  elements.queryViewBuildBtn.addEventListener("click", () => setQueryView("build"));
-  elements.queryViewRoutesBtn.addEventListener("click", () => setQueryView("routes"));
-  elements.queryViewTurnsBtn.addEventListener("click", () => setQueryView("turns"));
-  elements.queryModeSingleBtn.addEventListener("click", () => setQueryMode("single"));
-  elements.queryModeMultiBtn.addEventListener("click", () => setQueryMode("multi"));
+  elements.workspaceQueryBtn.addEventListener("click", () =>
+    setActiveTab("query"),
+  );
+  elements.workspaceCompareBtn.addEventListener("click", () =>
+    setActiveTab("compare"),
+  );
+  elements.queryViewBuildBtn.addEventListener("click", () =>
+    setQueryView("build"),
+  );
+  elements.queryViewRoutesBtn.addEventListener("click", () =>
+    setQueryView("routes"),
+  );
+  elements.queryViewTurnsBtn.addEventListener("click", () =>
+    setQueryView("turns"),
+  );
+  elements.queryModeSingleBtn.addEventListener("click", () =>
+    setQueryMode("single"),
+  );
+  elements.queryModeMultiBtn.addEventListener("click", () =>
+    setQueryMode("multi"),
+  );
   elements.swapPointsBtn.addEventListener("click", handleSwapPoints);
   elements.resetPointsBtn.addEventListener("click", handleResetPoints);
   elements.exportRouteBtn.addEventListener("click", handleExportRoute);
-  elements.compareViewAllBtn.addEventListener("click", () => setCompareView("all"));
-  elements.compareViewFocusBtn.addEventListener("click", () => setCompareView("focus"));
+  elements.compareViewAllBtn.addEventListener("click", () =>
+    setCompareView("all"),
+  );
+  elements.compareViewFocusBtn.addEventListener("click", () =>
+    setCompareView("focus"),
+  );
   elements.loadRouteFilesBtn.addEventListener("click", () => {
     elements.loadRouteFilesInput.click();
   });
-  elements.loadRouteFilesInput.addEventListener("change", handleCompareFilesSelected);
-  elements.compareFocusASelect.addEventListener("change", (event) => {
+  elements.loadRouteFilesInput.addEventListener(
+    "change",
+    handleCompareFilesSelected,
+  );
+  elements.compareFocusASelect.addEventListener("change", event => {
     state.focusRouteAId = event.target.value;
     ensureFocusSelections();
     renderCompareState();
@@ -329,7 +449,7 @@ function bindEvents() {
     }
     saveState();
   });
-  elements.compareFocusBSelect.addEventListener("change", (event) => {
+  elements.compareFocusBSelect.addEventListener("change", event => {
     state.focusRouteBId = event.target.value;
     ensureFocusSelections();
     renderCompareState();
@@ -344,50 +464,125 @@ function bindEvents() {
   elements.clearRoutesBtn.addEventListener("click", clearCompareRoutes);
   elements.cameraToggleBtn.addEventListener("click", handleCameraToggle);
   elements.trafficToggleBtn.addEventListener("click", handleTrafficToggle);
-  elements.trafficTertiaryFilterInput.addEventListener("change", handleTrafficTertiaryFilterToggle);
+  elements.trafficTertiaryFilterInput.addEventListener(
+    "change",
+    handleTrafficTertiaryFilterToggle,
+  );
 
-  document.querySelectorAll("[data-target]").forEach((button) => {
-    button.addEventListener("click", () => setActiveTarget(button.dataset.target));
+  document.querySelectorAll("[data-target]").forEach(button => {
+    button.addEventListener("click", () =>
+      setActiveTarget(button.dataset.target),
+    );
   });
 
-  document.querySelectorAll("[data-clear-point]").forEach((button) => {
-    button.addEventListener("click", () => clearPoint(button.dataset.clearPoint));
+  document.querySelectorAll("[data-clear-point]").forEach(button => {
+    button.addEventListener("click", () =>
+      clearPoint(button.dataset.clearPoint),
+    );
   });
 
-  elements.fromLatInput.addEventListener("input", (event) => {
+  elements.fromLatInput.addEventListener("input", event => {
     state.fromLat = event.target.value;
     invalidateRoutePreview();
     renderMarkers();
     saveState();
   });
-  elements.fromLngInput.addEventListener("input", (event) => {
+  elements.fromLngInput.addEventListener("input", event => {
     state.fromLng = event.target.value;
     invalidateRoutePreview();
     renderMarkers();
     saveState();
   });
-  elements.toLatInput.addEventListener("input", (event) => {
+  elements.toLatInput.addEventListener("input", event => {
     state.toLat = event.target.value;
     invalidateRoutePreview();
     renderMarkers();
     saveState();
   });
-  elements.toLngInput.addEventListener("input", (event) => {
+  elements.toLngInput.addEventListener("input", event => {
     state.toLng = event.target.value;
     invalidateRoutePreview();
     renderMarkers();
     saveState();
   });
-  elements.queryAlternativesInput.addEventListener("input", (event) => {
+  elements.queryAlternativesInput.addEventListener("input", event => {
     state.queryAlternatives = event.target.value;
     invalidateRoutePreview();
     saveState();
   });
-  elements.queryStretchInput.addEventListener("input", (event) => {
+  elements.queryStretchInput.addEventListener("input", event => {
     state.queryStretch = event.target.value;
     invalidateRoutePreview();
     saveState();
   });
+}
+
+function bindMeasurementEvents() {
+  elements.mapToolQueryBtn.addEventListener("click", () => setMapTool("query"));
+  elements.mapToolMeasureBtn.addEventListener("click", () =>
+    setMapTool("measure"),
+  );
+  elements.measureUndoBtn.addEventListener("click", handleMeasureUndo);
+  elements.measureClearBtn.addEventListener("click", () => {
+    clearMeasurement({ announce: true });
+  });
+}
+
+function initBaseMapFlavor() {
+  applyBaseMapFlavor(activeBaseMapFlavor);
+}
+
+function bindBaseMapEvents() {
+  elements.baseMapSimpleBtn.addEventListener("click", () =>
+    setBaseMapFlavor("simple_light"),
+  );
+  elements.baseMapBalancedBtn.addEventListener("click", () =>
+    setBaseMapFlavor("balanced_streets"),
+  );
+  elements.baseMapOsmBtn.addEventListener("click", () =>
+    setBaseMapFlavor("classic_osm"),
+  );
+}
+
+function setBaseMapFlavor(flavor) {
+  const normalizedFlavor = BASE_MAP_FLAVORS[flavor] ? flavor : "simple_light";
+  if (activeBaseMapFlavor === normalizedFlavor && activeBaseMapLayer) {
+    renderBaseMapState();
+    return;
+  }
+
+  activeBaseMapFlavor = normalizedFlavor;
+  applyBaseMapFlavor(activeBaseMapFlavor);
+  renderBaseMapState();
+}
+
+function applyBaseMapFlavor(flavor) {
+  const config =
+    BASE_MAP_FLAVORS[BASE_MAP_FLAVORS[flavor] ? flavor : "simple_light"];
+  map.eachLayer(layer => {
+    if (layer instanceof L.TileLayer) {
+      map.removeLayer(layer);
+    }
+  });
+  activeBaseMapLayer = L.tileLayer(config.tileUrl, config.options).addTo(map);
+}
+
+function renderBaseMapState() {
+  elements.baseMapSimpleBtn.classList.toggle(
+    "active",
+    activeBaseMapFlavor === "simple_light",
+  );
+  elements.baseMapBalancedBtn.classList.toggle(
+    "active",
+    activeBaseMapFlavor === "balanced_streets",
+  );
+  elements.baseMapOsmBtn.classList.toggle(
+    "active",
+    activeBaseMapFlavor === "classic_osm",
+  );
+  elements.baseMapStatus.textContent =
+    BASE_MAP_FLAVORS[activeBaseMapFlavor]?.description ||
+    BASE_MAP_FLAVORS.simple_light.description;
 }
 
 async function refreshServerContext() {
@@ -416,11 +611,20 @@ async function refreshServerContext() {
   }
 
   if (readyInfo?.ready) {
-    setBanner("Server ready. Select two points to run a coordinate query.", "success");
+    setBanner(
+      "Server ready. Select two points to run a coordinate query.",
+      "success",
+    );
   } else if (readyResult.status === "rejected") {
-    setBanner("Could not reach /ready. The API may still be starting or unavailable.", "warning");
+    setBanner(
+      "Could not reach /ready. The API may still be starting or unavailable.",
+      "warning",
+    );
   } else {
-    setBanner("Server responded but is not ready to serve queries yet.", "warning");
+    setBanner(
+      "Server responded but is not ready to serve queries yet.",
+      "warning",
+    );
   }
 }
 
@@ -437,15 +641,21 @@ async function handleResetWeights() {
     const response = await fetch("/reset_weights", { method: "POST" });
     const payload = await response.json();
     if (!response.ok || payload?.accepted !== true) {
-      throw new Error(payload?.message || "Could not reset weights to baseline.");
+      throw new Error(
+        payload?.message || "Could not reset weights to baseline.",
+      );
     }
 
     if (compareRoutes.length > 0) {
       await evaluateCompareRoutes({
-        bannerMessage: "Baseline weights were queued and imported routes were recalculated.",
+        bannerMessage:
+          "Baseline weights were queued and imported routes were recalculated.",
       });
     } else if (state.activeTab === "compare") {
-      setCompareBanner("Baseline weights were queued for re-application.", "success");
+      setCompareBanner(
+        "Baseline weights were queued for re-application.",
+        "success",
+      );
     }
 
     if (state.trafficEnabled) {
@@ -475,15 +685,20 @@ function renderServerContext() {
 
   elements.metaNodes.textContent = formatCount(serverInfo?.num_nodes);
   elements.metaEdges.textContent = formatCount(serverInfo?.num_edges);
-  elements.metaQueries.textContent = formatCount(healthInfo?.total_queries_processed);
-  elements.metaUptime.textContent = formatDurationSeconds(healthInfo?.uptime_seconds);
+  elements.metaQueries.textContent = formatCount(
+    healthInfo?.total_queries_processed,
+  );
+  elements.metaUptime.textContent = formatDurationSeconds(
+    healthInfo?.uptime_seconds,
+  );
 
   if (serverInfo?.bbox) {
     elements.coverageCaption.textContent =
-      `Coverage lat ${serverInfo.bbox.min_lat.toFixed(4)} to ${serverInfo.bbox.max_lat.toFixed(4)}, `
-      + `lng ${serverInfo.bbox.min_lng.toFixed(4)} to ${serverInfo.bbox.max_lng.toFixed(4)}.`;
+      `Coverage lat ${serverInfo.bbox.min_lat.toFixed(4)} to ${serverInfo.bbox.max_lat.toFixed(4)}, ` +
+      `lng ${serverInfo.bbox.min_lng.toFixed(4)} to ${serverInfo.bbox.max_lng.toFixed(4)}.`;
   } else {
-    elements.coverageCaption.textContent = "Coverage bounds are not available for this dataset.";
+    elements.coverageCaption.textContent =
+      "Coverage bounds are not available for this dataset.";
   }
 }
 
@@ -502,18 +717,22 @@ function getQueryOptions() {
 
   return {
     mode: state.queryMode === "multi" ? "multi" : "single",
-    alternatives: Number.isFinite(alternativesInput) && alternativesInput > 0
-      ? Math.min(alternativesInput, 20)
-      : 5,
-    stretch: Number.isFinite(stretchInput) && stretchInput >= 1
-      ? Math.min(stretchInput, 3)
-      : 1.3,
+    alternatives:
+      Number.isFinite(alternativesInput) && alternativesInput > 0
+        ? Math.min(alternativesInput, 20)
+        : 5,
+    stretch:
+      Number.isFinite(stretchInput) && stretchInput >= 1
+        ? Math.min(stretchInput, 3)
+        : 1.3,
   };
 }
 
 function getQueryRouteFeatures() {
   return Array.isArray(queryRouteFeatureCollection?.features)
-    ? queryRouteFeatureCollection.features.filter((feature) => feature?.geometry?.type === "LineString")
+    ? queryRouteFeatureCollection.features.filter(
+        feature => feature?.geometry?.type === "LineString",
+      )
     : [];
 }
 
@@ -529,7 +748,10 @@ function ensureActiveQueryRouteSelection() {
     return;
   }
 
-  const hasActiveRoute = features.some((feature, index) => getFeatureRouteIndex(feature, index) === activeQueryRouteIndex);
+  const hasActiveRoute = features.some(
+    (feature, index) =>
+      getFeatureRouteIndex(feature, index) === activeQueryRouteIndex,
+  );
   if (!hasActiveRoute) {
     activeQueryRouteIndex = getFeatureRouteIndex(features[0], 0);
   }
@@ -538,11 +760,20 @@ function ensureActiveQueryRouteSelection() {
 function getSelectedQueryFeature() {
   const features = getQueryRouteFeatures();
   ensureActiveQueryRouteSelection();
-  return features.find((feature, index) => getFeatureRouteIndex(feature, index) === activeQueryRouteIndex) ?? features[0] ?? null;
+  return (
+    features.find(
+      (feature, index) =>
+        getFeatureRouteIndex(feature, index) === activeQueryRouteIndex,
+    ) ??
+    features[0] ??
+    null
+  );
 }
 
 function getQueryRouteColor(routeIndex) {
-  return QUERY_ROUTE_COLORS[Math.max(routeIndex, 0) % QUERY_ROUTE_COLORS.length];
+  return QUERY_ROUTE_COLORS[
+    Math.max(routeIndex, 0) % QUERY_ROUTE_COLORS.length
+  ];
 }
 
 function getQueryRouteLabel(routeIndex) {
@@ -554,7 +785,9 @@ function getQueryRouteHeadline(routeIndex, routeCount) {
   if (routeCount > 1 && routeIndex === 0) {
     return "Primary Route";
   }
-  return routeCount > 1 ? `Alternative ${getQueryRouteLabel(routeIndex).replace("Route ", "")}` : "Route";
+  return routeCount > 1
+    ? `Alternative ${getQueryRouteLabel(routeIndex).replace("Route ", "")}`
+    : "Route";
 }
 
 function buildQueryRouteStyle(feature, { halo }) {
@@ -657,11 +890,14 @@ function setQueryView(view) {
 }
 
 function renderQueryViewState() {
-  const activeView = state.queryView === "routes" || state.queryView === "turns" ? state.queryView : "build";
-  elements.queryViewButtons.forEach((button) => {
+  const activeView =
+    state.queryView === "routes" || state.queryView === "turns"
+      ? state.queryView
+      : "build";
+  elements.queryViewButtons.forEach(button => {
     button.classList.toggle("active", button.dataset.queryView === activeView);
   });
-  elements.queryViewPanels.forEach((panel) => {
+  elements.queryViewPanels.forEach(panel => {
     const isActive = panel.dataset.queryViewPanel === activeView;
     panel.classList.toggle("active", isActive);
     panel.hidden = !isActive;
@@ -680,8 +916,13 @@ function setSidebarCollapsed(collapsed) {
 
 function renderSidebarState() {
   document.body.classList.toggle("sidebar-collapsed", state.sidebarCollapsed);
-  elements.sidebarCollapseBtn.textContent = state.sidebarCollapsed ? "Expand Panel" : "Collapse Panel";
-  elements.sidebarCollapseBtn.setAttribute("aria-expanded", String(!state.sidebarCollapsed));
+  elements.sidebarCollapseBtn.textContent = state.sidebarCollapsed
+    ? "Expand Panel"
+    : "Collapse Panel";
+  elements.sidebarCollapseBtn.setAttribute(
+    "aria-expanded",
+    String(!state.sidebarCollapsed),
+  );
   elements.sidebarPeekBtn.hidden = !state.sidebarCollapsed;
 
   if (map) {
@@ -702,21 +943,98 @@ function setCompareView(view) {
 }
 
 function setActiveTarget(target) {
+  if (activeMapTool !== "query") {
+    setMapTool("query", { announce: false });
+  }
   state.activeTarget = target === "to" ? "to" : "from";
   renderPickerState();
   saveState();
 }
 
+function setMapTool(tool, { announce = true } = {}) {
+  const normalizedTool = tool === "measure" ? "measure" : "query";
+  if (activeMapTool === normalizedTool) {
+    renderMapToolState();
+    renderMeasureState();
+    renderPickerState();
+    return;
+  }
+
+  activeMapTool = normalizedTool;
+  renderMapToolState();
+  renderMeasureState();
+  renderPickerState();
+
+  if (!announce) {
+    return;
+  }
+
+  if (activeMapTool === "measure") {
+    const message =
+      measurePathPoints.length > 0
+        ? "Distance measuring is active. Click the map to extend the measured path."
+        : "Distance measuring is active. Click the map to place the first point.";
+    if (state.activeTab === "compare") {
+      setCompareBanner(message, "info");
+    } else {
+      setBanner(message, "info");
+    }
+    return;
+  }
+
+  if (state.activeTab === "query") {
+    setBanner(
+      "Route picker is active. Click the map to place source and destination points.",
+      "info",
+    );
+  } else {
+    setCompareBanner(
+      "Route picking is only available on the Query tab. Use Measure or switch back to Query.",
+      "info",
+    );
+  }
+}
+
+function renderMapToolState() {
+  const isMeasureTool = activeMapTool === "measure";
+  elements.mapToolQueryBtn.classList.toggle("active", !isMeasureTool);
+  elements.mapToolMeasureBtn.classList.toggle("active", isMeasureTool);
+  elements.measureModeChip.textContent = isMeasureTool
+    ? "Measuring"
+    : "Route picker";
+  elements.measureModeChip.className = `soft-chip measure-chip${isMeasureTool ? " active" : ""}`;
+}
+
 function renderPickerState() {
   const isQueryTab = state.activeTab === "query";
   const pickingSource = state.activeTarget === "from";
+  const isMeasureTool = activeMapTool === "measure";
   elements.pickFromBtn.classList.toggle("active", pickingSource);
   elements.pickToBtn.classList.toggle("active", !pickingSource);
   elements.fromCard.classList.toggle("active", pickingSource);
   elements.toCard.classList.toggle("active", !pickingSource);
 
+  if (isMeasureTool) {
+    const hasSegments = measurePathPoints.length > 1;
+    const statusLead = hasSegments
+      ? `Measured ${formatDistance(getMeasurementDistanceM())} so far.`
+      : measurePathPoints.length === 1
+        ? "One measurement point is placed."
+        : "Measurement mode is active.";
+    elements.pickerHint.textContent = isQueryTab
+      ? `${statusLead} Map clicks now add measurement vertices instead of source and destination points.`
+      : `${statusLead} Compare mode stays active while map clicks add measurement vertices.`;
+    elements.mapOverlayTitle.textContent = hasSegments
+      ? "Click to extend the measured path"
+      : "Click to start measuring";
+    elements.mapOverlayCopy.textContent =
+      "Each click adds a waypoint to the measured path. Use Undo or Clear Measure from the sidebar to refine it.";
+    return;
+  }
+
   if (!isQueryTab) {
-    elements.pickerHint.textContent = "Map clicks are disabled while the Compare tab is active.";
+    elements.pickerHint.textContent =
+      "Map clicks are disabled while the Compare tab is active.";
     elements.mapOverlayTitle.textContent = "Compare imported routes";
     elements.mapOverlayCopy.textContent =
       "Load exported GeoJSON files to evaluate and visualize multiple routes under the same active traffic condition.";
@@ -727,14 +1045,18 @@ function renderPickerState() {
   const nextTargetLabel = pickingSource ? "destination" : "source";
   elements.pickerHint.textContent = `Map clicks are currently targeting the ${currentTargetLabel} point.`;
   elements.mapOverlayTitle.textContent = `Click to set the ${currentTargetLabel}`;
-  elements.mapOverlayCopy.textContent =
-    `After placing the ${currentTargetLabel}, the picker advances to ${nextTargetLabel} so you can keep working from the map.`;
+  elements.mapOverlayCopy.textContent = `After placing the ${currentTargetLabel}, the picker advances to ${nextTargetLabel} so you can keep working from the map.`;
 }
 
 function renderLegendCardState() {
   elements.legendCard.classList.toggle("collapsed", state.legendCollapsed);
-  elements.legendCollapseBtn.textContent = state.legendCollapsed ? "Expand" : "Collapse";
-  elements.legendCollapseBtn.setAttribute("aria-expanded", String(!state.legendCollapsed));
+  elements.legendCollapseBtn.textContent = state.legendCollapsed
+    ? "Expand"
+    : "Collapse";
+  elements.legendCollapseBtn.setAttribute(
+    "aria-expanded",
+    String(!state.legendCollapsed),
+  );
 }
 
 function handleLegendCollapse() {
@@ -744,21 +1066,35 @@ function handleLegendCollapse() {
 }
 
 function renderTrafficOverlayControls(statusMessage = null) {
-  elements.trafficToggleBtn.textContent = state.trafficEnabled ? "Hide" : "Show";
-  elements.trafficToggleBtn.classList.toggle("primary-btn", state.trafficEnabled);
-  elements.trafficToggleBtn.classList.toggle("secondary-btn", !state.trafficEnabled);
-  elements.trafficTertiaryFilterInput.disabled = !trafficTertiaryFilterSupported;
+  elements.trafficToggleBtn.textContent = state.trafficEnabled
+    ? "Hide"
+    : "Show";
+  elements.trafficToggleBtn.classList.toggle(
+    "primary-btn",
+    state.trafficEnabled,
+  );
+  elements.trafficToggleBtn.classList.toggle(
+    "secondary-btn",
+    !state.trafficEnabled,
+  );
+  elements.trafficTertiaryFilterInput.disabled =
+    !trafficTertiaryFilterSupported;
   elements.trafficTertiaryFilterInput.checked =
     trafficTertiaryFilterSupported && state.trafficTertiaryAndAboveOnly;
-  elements.trafficOverlayStatus.textContent = statusMessage ?? defaultTrafficOverlayStatus();
+  elements.trafficOverlayStatus.textContent =
+    statusMessage ?? defaultTrafficOverlayStatus();
 }
 
 function renderCameraOverlayControls(statusMessage = null) {
   elements.cameraToggleBtn.textContent = state.cameraEnabled ? "Hide" : "Show";
   elements.cameraToggleBtn.classList.toggle("primary-btn", state.cameraEnabled);
-  elements.cameraToggleBtn.classList.toggle("secondary-btn", !state.cameraEnabled);
+  elements.cameraToggleBtn.classList.toggle(
+    "secondary-btn",
+    !state.cameraEnabled,
+  );
   elements.cameraToggleBtn.disabled = !cameraOverlayAvailable;
-  elements.cameraOverlayStatus.textContent = statusMessage ?? defaultCameraOverlayStatus();
+  elements.cameraOverlayStatus.textContent =
+    statusMessage ?? defaultCameraOverlayStatus();
 }
 
 function defaultCameraOverlayStatus() {
@@ -844,12 +1180,12 @@ function syncTrafficOverlayPolling() {
 }
 
 function clearTrafficLayers() {
-  trafficLayers.forEach((layer) => layer.remove());
+  trafficLayers.forEach(layer => layer.remove());
   trafficLayers = [];
 }
 
 function clearCameraLayers() {
-  cameraLayers.forEach((layer) => layer.remove());
+  cameraLayers.forEach(layer => layer.remove());
   cameraLayers = [];
 }
 
@@ -880,7 +1216,11 @@ async function refreshCameraOverlay({ silent = false } = {}) {
       return;
     }
     if (!response.ok) {
-      throw new Error(payload.error || payload.message || "Could not load the camera overlay.");
+      throw new Error(
+        payload.error ||
+          payload.message ||
+          "Could not load the camera overlay.",
+      );
     }
     applyCameraOverlay(payload);
   } catch (error) {
@@ -888,7 +1228,9 @@ async function refreshCameraOverlay({ silent = false } = {}) {
       return;
     }
     clearCameraLayers();
-    renderCameraOverlayControls(error instanceof Error ? error.message : String(error));
+    renderCameraOverlayControls(
+      error instanceof Error ? error.message : String(error),
+    );
   }
 }
 
@@ -927,7 +1269,11 @@ async function refreshTrafficOverlay({ silent = false } = {}) {
       return;
     }
     if (!response.ok) {
-      throw new Error(payload.error || payload.message || "Could not load the traffic overlay.");
+      throw new Error(
+        payload.error ||
+          payload.message ||
+          "Could not load the traffic overlay.",
+      );
     }
     applyTrafficOverlay(payload);
   } catch (error) {
@@ -935,7 +1281,9 @@ async function refreshTrafficOverlay({ silent = false } = {}) {
       return;
     }
     clearTrafficLayers();
-    renderTrafficOverlayControls(error instanceof Error ? error.message : String(error));
+    renderTrafficOverlayControls(
+      error instanceof Error ? error.message : String(error),
+    );
   }
 }
 
@@ -947,7 +1295,8 @@ function applyCameraOverlay(payload) {
     state.cameraEnabled = false;
     saveState();
     renderCameraOverlayControls(
-      payload?.message || "Camera overlay is unavailable for the current server configuration.",
+      payload?.message ||
+        "Camera overlay is unavailable for the current server configuration.",
     );
     return;
   }
@@ -961,14 +1310,22 @@ function applyCameraOverlay(payload) {
       continue;
     }
 
-    const label = typeof camera?.label === "string" && camera.label.trim()
-      ? camera.label.trim()
-      : "Camera";
-    const idRow = camera?.id == null ? "" : `<div><strong>ID</strong>: ${escapeHtml(String(camera.id))}</div>`;
-    const profileRow = typeof camera?.profile === "string" && camera.profile.trim()
-      ? `<div><strong>Profile</strong>: ${escapeHtml(camera.profile.trim())}</div>`
-      : "";
-    const arcRow = camera?.arc_id == null ? "" : `<div><strong>Arc</strong>: ${escapeHtml(String(camera.arc_id))}</div>`;
+    const label =
+      typeof camera?.label === "string" && camera.label.trim()
+        ? camera.label.trim()
+        : "Camera";
+    const idRow =
+      camera?.id == null
+        ? ""
+        : `<div><strong>ID</strong>: ${escapeHtml(String(camera.id))}</div>`;
+    const profileRow =
+      typeof camera?.profile === "string" && camera.profile.trim()
+        ? `<div><strong>Profile</strong>: ${escapeHtml(camera.profile.trim())}</div>`
+        : "";
+    const arcRow =
+      camera?.arc_id == null
+        ? ""
+        : `<div><strong>Arc</strong>: ${escapeHtml(String(camera.arc_id))}</div>`;
 
     const marker = L.circleMarker([lat, lng], {
       pane: "cameraOverlay",
@@ -990,7 +1347,9 @@ function applyCameraOverlay(payload) {
   const visibleCameraCount = cameraLayers.length;
 
   if (totalCameraCount === 0) {
-    renderCameraOverlayControls("Camera overlay is on, but the configured YAML file does not contain any cameras.");
+    renderCameraOverlayControls(
+      "Camera overlay is on, but the configured YAML file does not contain any cameras.",
+    );
     return;
   }
 
@@ -1020,7 +1379,7 @@ function applyTrafficOverlay(payload) {
       renderer: trafficRenderer,
       className: "traffic-overlay",
       color: bucket.color || "#34c26b",
-      weight: 3,
+      weight: 2,
       opacity: 0.82,
       lineCap: "round",
       lineJoin: "round",
@@ -1029,17 +1388,28 @@ function applyTrafficOverlay(payload) {
   }
 
   const visibleSegmentCount = Number(payload?.visible_segment_count) || 0;
-  const mappingMode = payload?.mapping_mode === "line_graph_pseudo_normal" ? "pseudo-normal line graph" : "normal graph";
-  const trafficMode = payload?.using_customized_weights ? "Customized traffic" : "Baseline traffic";
-  const filterLabel = payload?.tertiary_and_above_only ? " · tertiary+ only" : "";
+  const mappingMode =
+    payload?.mapping_mode === "line_graph_pseudo_normal"
+      ? "pseudo-normal line graph"
+      : "normal graph";
+  const trafficMode = payload?.using_customized_weights
+    ? "Customized traffic"
+    : "Baseline traffic";
+  const filterLabel = payload?.tertiary_and_above_only
+    ? " · tertiary+ only"
+    : "";
 
   if (!trafficTertiaryFilterSupported && state.trafficTertiaryAndAboveOnly) {
-    renderTrafficOverlayControls("Road-class filtering is unavailable for this dataset.");
+    renderTrafficOverlayControls(
+      "Road-class filtering is unavailable for this dataset.",
+    );
     return;
   }
 
   if (visibleSegmentCount === 0) {
-    renderTrafficOverlayControls(`No visible traffic segments in the current view (${mappingMode}${filterLabel}).`);
+    renderTrafficOverlayControls(
+      `No visible traffic segments in the current view (${mappingMode}${filterLabel}).`,
+    );
     return;
   }
 
@@ -1060,7 +1430,9 @@ function renderMarkers() {
     } else {
       fromMarker.setLatLng([from.lat, from.lng]);
     }
-    fromMarker.bindPopup(`<strong>Source</strong><br>${formatCoordinate(from.lat, from.lng)}`);
+    fromMarker.bindPopup(
+      `<strong>Source</strong><br>${formatCoordinate(from.lat, from.lng)}`,
+    );
   } else if (fromMarker) {
     map.removeLayer(fromMarker);
     fromMarker = null;
@@ -1074,7 +1446,9 @@ function renderMarkers() {
     } else {
       toMarker.setLatLng([to.lat, to.lng]);
     }
-    toMarker.bindPopup(`<strong>Destination</strong><br>${formatCoordinate(to.lat, to.lng)}`);
+    toMarker.bindPopup(
+      `<strong>Destination</strong><br>${formatCoordinate(to.lat, to.lng)}`,
+    );
   } else if (toMarker) {
     map.removeLayer(toMarker);
     toMarker = null;
@@ -1091,9 +1465,147 @@ function markerIcon(label, className) {
   });
 }
 
+function renderMeasureState() {
+  const totalDistanceM = getMeasurementDistanceM();
+  const pointCount = measurePathPoints.length;
+  const segmentCount = Math.max(pointCount - 1, 0);
+
+  elements.measureDistance.textContent =
+    pointCount > 1 ? formatDistance(totalDistanceM) : "—";
+  elements.measureSegments.textContent = formatCount(segmentCount);
+  elements.measurePoints.textContent = formatCount(pointCount);
+  elements.measureStatus.textContent = getMeasureStatusText(
+    pointCount,
+    segmentCount,
+    totalDistanceM,
+  );
+  elements.measureUndoBtn.disabled = pointCount === 0;
+  elements.measureClearBtn.disabled = pointCount === 0;
+
+  if (measureLineLayer) {
+    measureLineLayer.setLatLngs(
+      measurePathPoints.map(point => [point.lat, point.lng]),
+    );
+  }
+
+  if (measurePointLayerGroup) {
+    measurePointLayerGroup.clearLayers();
+
+    measurePathPoints.forEach((point, index) => {
+      const isFirst = index === 0;
+      const isLast = index === measurePathPoints.length - 1;
+      const marker = L.circleMarker([point.lat, point.lng], {
+        pane: "measurementPoint",
+        radius: isFirst || isLast ? 6.5 : 5,
+        color: "#ffffff",
+        weight: 2,
+        fillColor: isFirst
+          ? MEASURE_START_COLOR
+          : isLast
+            ? MEASURE_LINE_COLOR
+            : MEASURE_MID_COLOR,
+        fillOpacity: 0.96,
+      }).addTo(measurePointLayerGroup);
+
+      const pointLabel = isFirst
+        ? "Measure start"
+        : isLast
+          ? "Latest measure point"
+          : `Measure point ${index + 1}`;
+      marker.bindPopup(
+        `<strong>${escapeHtml(pointLabel)}</strong><br>${escapeHtml(formatCoordinate(point.lat, point.lng))}`,
+      );
+    });
+  }
+}
+
+function getMeasureStatusText(pointCount, segmentCount, totalDistanceM) {
+  if (activeMapTool !== "measure") {
+    return pointCount > 1
+      ? `Measured path saved at ${formatDistance(totalDistanceM)} across ${formatCount(segmentCount)} segment(s). Switch back to Measure to continue editing it.`
+      : pointCount === 1
+        ? "A single measurement point is on the map. Switch back to Measure to keep building the path."
+        : "Route picker is active. Switch to Measure to click out a custom path on the map.";
+  }
+
+  if (pointCount === 0) {
+    return "Click anywhere on the map to place the first measurement point.";
+  }
+
+  if (pointCount === 1) {
+    return "Start point placed. Click again to add the first measured segment.";
+  }
+
+  return `Measured ${formatDistance(totalDistanceM)} across ${formatCount(segmentCount)} segment(s). Click again to extend the path.`;
+}
+
+function getMeasurementDistanceM() {
+  if (measurePathPoints.length < 2) {
+    return 0;
+  }
+
+  let totalDistanceM = 0;
+  for (let index = 1; index < measurePathPoints.length; index += 1) {
+    totalDistanceM += L.latLng(
+      measurePathPoints[index - 1].lat,
+      measurePathPoints[index - 1].lng,
+    ).distanceTo(
+      L.latLng(measurePathPoints[index].lat, measurePathPoints[index].lng),
+    );
+  }
+  return totalDistanceM;
+}
+
+function addMeasurementPoint(lat, lng) {
+  measurePathPoints.push({ lat, lng });
+  renderMeasureState();
+  renderPickerState();
+}
+
+function handleMeasureUndo() {
+  if (measurePathPoints.length === 0) {
+    return;
+  }
+
+  measurePathPoints.pop();
+  renderMeasureState();
+  renderPickerState();
+}
+
+function clearMeasurement({ announce = false } = {}) {
+  if (measurePathPoints.length === 0) {
+    renderMeasureState();
+    renderPickerState();
+    return;
+  }
+
+  measurePathPoints = [];
+  renderMeasureState();
+  renderPickerState();
+
+  if (!announce) {
+    return;
+  }
+
+  if (state.activeTab === "compare") {
+    setCompareBanner("Measured path cleared from the map.", "info");
+  } else {
+    setBanner("Measured path cleared from the map.", "info");
+  }
+}
+
 function handleMapClick(event) {
+  if (activeMapTool === "measure") {
+    const { lat, lng } = event.latlng;
+    addMeasurementPoint(lat, lng);
+    return;
+  }
+
   if (state.activeTab !== "query") {
-    setCompareBanner("Map clicks only place source and destination points on the Query tab.", "info");
+    setCompareBanner(
+      "Map clicks only place source and destination points on the Query tab.",
+      "info",
+    );
     return;
   }
 
@@ -1181,10 +1693,13 @@ async function handleQuerySubmit(event) {
     queryParams.set("alternatives", String(queryOptions.alternatives));
     queryParams.set("stretch", String(queryOptions.stretch));
   }
-  const queryUrl = queryParams.toString() ? `/query?${queryParams.toString()}` : "/query";
+  const queryUrl = queryParams.toString()
+    ? `/query?${queryParams.toString()}`
+    : "/query";
 
   elements.runQueryBtn.disabled = true;
-  elements.runQueryBtn.textContent = queryOptions.mode === "multi" ? "Finding routes…" : "Routing…";
+  elements.runQueryBtn.textContent =
+    queryOptions.mode === "multi" ? "Finding routes…" : "Routing…";
   setBanner(
     queryOptions.mode === "multi"
       ? "Querying hanoi_server for alternative routes…"
@@ -1226,11 +1741,17 @@ function buildQueryPayload() {
   const to = getPoint("to");
 
   if (!from || !to) {
-    setBanner("Both source and destination coordinates are required.", "warning");
+    setBanner(
+      "Both source and destination coordinates are required.",
+      "warning",
+    );
     return null;
   }
 
-  if (!isFiniteCoordinate(from.lat, from.lng) || !isFiniteCoordinate(to.lat, to.lng)) {
+  if (
+    !isFiniteCoordinate(from.lat, from.lng) ||
+    !isFiniteCoordinate(to.lat, to.lng)
+  ) {
     setBanner("Coordinates must be finite numeric values.", "warning");
     return null;
   }
@@ -1244,25 +1765,46 @@ function buildQueryPayload() {
 }
 
 function applyRouteResult(featureCollection, latencyMs) {
-  const normalized = normalizeRouteGeojson(featureCollection, { preserveAllLineStrings: true });
-  const features = Array.isArray(normalized.features) ? normalized.features : [];
+  const normalized = normalizeRouteGeojson(featureCollection, {
+    preserveAllLineStrings: true,
+  });
+  const features = Array.isArray(normalized.features)
+    ? normalized.features
+    : [];
   const firstFeature = features[0] ?? null;
   const firstGeometry = firstFeature?.geometry ?? null;
-  lastRouteGeometryPointCount = Array.isArray(firstGeometry?.coordinates) ? firstGeometry.coordinates.length : null;
+  lastRouteGeometryPointCount = Array.isArray(firstGeometry?.coordinates)
+    ? firstGeometry.coordinates.length
+    : null;
   queryRouteFeatureCollection = normalized;
   lastQueryLatencyMs = latencyMs;
-  activeQueryRouteIndex = firstFeature ? getFeatureRouteIndex(firstFeature, 0) : 0;
+  activeQueryRouteIndex = firstFeature
+    ? getFeatureRouteIndex(firstFeature, 0)
+    : 0;
   state.queryView = "routes";
   renderQueryViewState();
   saveState();
   refreshDisplayedRoutes();
 
-  if (!firstGeometry || firstGeometry.type !== "LineString" || features.length === 0) {
+  if (
+    !firstGeometry ||
+    firstGeometry.type !== "LineString" ||
+    features.length === 0
+  ) {
     renderEmptyRouteState();
     elements.statLatency.textContent = `${Math.round(latencyMs)} ms`;
-    elements.summaryFrom.textContent = formatCoordinateValue(state.fromLat, state.fromLng);
-    elements.summaryTo.textContent = formatCoordinateValue(state.toLat, state.toLng);
-    setBanner("The server returned GeoJSON, but no route geometry was found for this pair.", "warning");
+    elements.summaryFrom.textContent = formatCoordinateValue(
+      state.fromLat,
+      state.fromLng,
+    );
+    elements.summaryTo.textContent = formatCoordinateValue(
+      state.toLat,
+      state.toLng,
+    );
+    setBanner(
+      "The server returned GeoJSON, but no route geometry was found for this pair.",
+      "warning",
+    );
     return;
   }
 
@@ -1289,12 +1831,22 @@ function renderEmptyRouteState() {
   elements.statDistance.textContent = "—";
   elements.statTurns.textContent = "—";
   elements.statLatency.textContent = "—";
-  elements.summaryFrom.textContent = formatCoordinateValue(state.fromLat, state.fromLng);
-  elements.summaryTo.textContent = formatCoordinateValue(state.toLat, state.toLng);
-  elements.summaryPoints.textContent = lastRouteGeometryPointCount == null ? "—" : formatCount(lastRouteGeometryPointCount);
+  elements.summaryFrom.textContent = formatCoordinateValue(
+    state.fromLat,
+    state.fromLng,
+  );
+  elements.summaryTo.textContent = formatCoordinateValue(
+    state.toLat,
+    state.toLng,
+  );
+  elements.summaryPoints.textContent =
+    lastRouteGeometryPointCount == null
+      ? "—"
+      : formatCount(lastRouteGeometryPointCount);
   elements.summaryMode.textContent = "GeoJSON / coordinates";
   elements.queryRouteCount.textContent = "0 routes";
-  elements.queryRouteCaption.textContent = "Run a query to populate the current route stack.";
+  elements.queryRouteCaption.textContent =
+    "Run a query to populate the current route stack.";
   elements.queryRouteList.className = "query-route-list empty";
   elements.queryRouteList.textContent = "No route queried yet.";
   elements.turnList.className = "turn-list empty";
@@ -1326,20 +1878,30 @@ function renderSelectedQueryRoute() {
   const geometry = selectedFeature.geometry ?? null;
   const routeIndex = getFeatureRouteIndex(selectedFeature);
   const turns = Array.isArray(properties.turns) ? properties.turns : [];
-  const coordinates = Array.isArray(geometry?.coordinates) ? geometry.coordinates : [];
+  const coordinates = Array.isArray(geometry?.coordinates)
+    ? geometry.coordinates
+    : [];
   const routeCount = features.length;
   const graphType = formatGraphType(properties.graph_type).toLowerCase();
 
-  elements.routeBadge.textContent = routeCount > 1
-    ? `${getQueryRouteLabel(routeIndex)} selected`
-    : "Route ready";
+  elements.routeBadge.textContent =
+    routeCount > 1
+      ? `${getQueryRouteLabel(routeIndex)} selected`
+      : "Route ready";
   elements.routeBadge.className = "soft-chip";
   elements.statTime.textContent = formatTravelTime(properties.distance_ms);
   elements.statDistance.textContent = formatDistance(properties.distance_m);
   elements.statTurns.textContent = String(turns.length);
-  elements.statLatency.textContent = lastQueryLatencyMs == null ? "—" : `${Math.round(lastQueryLatencyMs)} ms`;
-  elements.summaryFrom.textContent = formatCoordinateValue(state.fromLat, state.fromLng);
-  elements.summaryTo.textContent = formatCoordinateValue(state.toLat, state.toLng);
+  elements.statLatency.textContent =
+    lastQueryLatencyMs == null ? "—" : `${Math.round(lastQueryLatencyMs)} ms`;
+  elements.summaryFrom.textContent = formatCoordinateValue(
+    state.fromLat,
+    state.fromLng,
+  );
+  elements.summaryTo.textContent = formatCoordinateValue(
+    state.toLat,
+    state.toLng,
+  );
   elements.summaryPoints.textContent = formatCount(coordinates.length);
   elements.summaryMode.textContent = `${routeCount > 1 ? "Multi-route" : "Single route"} / ${graphType}`;
 
@@ -1352,7 +1914,8 @@ function renderQueryRouteList() {
   const features = getQueryRouteFeatures();
   if (!features.length) {
     elements.queryRouteCount.textContent = "0 routes";
-    elements.queryRouteCaption.textContent = "Run a query to populate the current route stack.";
+    elements.queryRouteCaption.textContent =
+      "Run a query to populate the current route stack.";
     elements.queryRouteList.className = "query-route-list empty";
     elements.queryRouteList.textContent = "No route queried yet.";
     return;
@@ -1362,9 +1925,10 @@ function renderQueryRouteList() {
   const primaryTravelTime = Number(features[0]?.properties?.distance_ms) || 0;
 
   elements.queryRouteCount.textContent = `${features.length} route${features.length === 1 ? "" : "s"}`;
-  elements.queryRouteCaption.textContent = features.length > 1
-    ? "Select a route to focus the summary, map emphasis, and maneuver list."
-    : "The current query returned a single route.";
+  elements.queryRouteCaption.textContent =
+    features.length > 1
+      ? "Select a route to focus the summary, map emphasis, and maneuver list."
+      : "The current query returned a single route.";
   elements.queryRouteList.className = "query-route-list";
   elements.queryRouteList.innerHTML = features
     .map((feature, index) => {
@@ -1373,16 +1937,22 @@ function renderQueryRouteList() {
       const routeIndex = getFeatureRouteIndex(feature, index);
       const travelTime = Number(properties.distance_ms) || 0;
       const distance = Number(properties.distance_m) || 0;
-      const pointCount = Array.isArray(geometry.coordinates) ? geometry.coordinates.length : 0;
-      const turnCount = Array.isArray(properties.turns) ? properties.turns.length : 0;
+      const pointCount = Array.isArray(geometry.coordinates)
+        ? geometry.coordinates.length
+        : 0;
+      const turnCount = Array.isArray(properties.turns)
+        ? properties.turns.length
+        : 0;
       const color = getQueryRouteColor(routeIndex);
       const isActive = routeIndex === activeQueryRouteIndex;
-      const travelTimeDelta = primaryTravelTime > 0
-        ? ((travelTime - primaryTravelTime) / primaryTravelTime) * 100
-        : 0;
-      const note = routeIndex === 0
-        ? "Reference route returned first by the server."
-        : `${travelTimeDelta >= 0 ? "+" : ""}${travelTimeDelta.toFixed(1)}% travel time vs the primary route.`;
+      const travelTimeDelta =
+        primaryTravelTime > 0
+          ? ((travelTime - primaryTravelTime) / primaryTravelTime) * 100
+          : 0;
+      const note =
+        routeIndex === 0
+          ? "Reference route returned first by the server."
+          : `${travelTimeDelta >= 0 ? "+" : ""}${travelTimeDelta.toFixed(1)}% travel time vs the primary route.`;
 
       return `
         <article class="query-route-card${isActive ? " active" : ""}" data-route-index="${routeIndex}">
@@ -1422,12 +1992,14 @@ function renderQueryRouteList() {
     })
     .join("");
 
-  elements.queryRouteList.querySelectorAll("[data-route-index]").forEach((card) => {
-    card.addEventListener("click", () => {
-      const routeIndex = Number(card.dataset.routeIndex);
-      setActiveQueryRoute(routeIndex, { focusMap: true });
+  elements.queryRouteList
+    .querySelectorAll("[data-route-index]")
+    .forEach(card => {
+      card.addEventListener("click", () => {
+        const routeIndex = Number(card.dataset.routeIndex);
+        setActiveQueryRoute(routeIndex, { focusMap: true });
+      });
     });
-  });
 }
 
 function setActiveQueryRoute(routeIndex, { focusMap = false } = {}) {
@@ -1445,8 +2017,12 @@ function setActiveQueryRoute(routeIndex, { focusMap = false } = {}) {
 }
 
 function focusQueryRoute(routeIndex) {
-  const feature = getQueryRouteFeatures().find((item, index) => getFeatureRouteIndex(item, index) === routeIndex);
-  const coordinates = Array.isArray(feature?.geometry?.coordinates) ? feature.geometry.coordinates : [];
+  const feature = getQueryRouteFeatures().find(
+    (item, index) => getFeatureRouteIndex(item, index) === routeIndex,
+  );
+  const coordinates = Array.isArray(feature?.geometry?.coordinates)
+    ? feature.geometry.coordinates
+    : [];
   if (!coordinates.length) {
     return;
   }
@@ -1470,7 +2046,8 @@ function renderTurns(turns) {
   elements.turnList.className = "turn-list";
   elements.turnList.innerHTML = turns
     .map((turn, index) => {
-      const title = TURN_LABELS[turn.direction] ?? humanizeSnakeCase(turn.direction);
+      const title =
+        TURN_LABELS[turn.direction] ?? humanizeSnakeCase(turn.direction);
       return `
         <article class="turn-item">
           <div class="turn-item-head">
@@ -1485,7 +2062,9 @@ function renderTurns(turns) {
 }
 
 function updateExportRouteButton() {
-  elements.exportRouteBtn.disabled = !(queryRouteFeatureCollection?.features?.length > 0);
+  elements.exportRouteBtn.disabled = !(
+    queryRouteFeatureCollection?.features?.length > 0
+  );
 }
 
 function clearRouteLayers() {
@@ -1494,7 +2073,7 @@ function clearRouteLayers() {
 }
 
 function clearCompareRouteLayers() {
-  compareRouteLayers.forEach((layer) => layer.remove());
+  compareRouteLayers.forEach(layer => layer.remove());
   compareRouteLayers = [];
 }
 
@@ -1554,10 +2133,12 @@ function normalizeRouteGeojson(value, { preserveAllLineStrings = false } = {}) {
 
   if (value.type === "FeatureCollection") {
     const features = Array.isArray(value.features)
-      ? value.features.filter((item) => item?.geometry?.type === "LineString")
+      ? value.features.filter(item => item?.geometry?.type === "LineString")
       : [];
     if (!features.length) {
-      throw new Error("GeoJSON FeatureCollection must contain a LineString feature.");
+      throw new Error(
+        "GeoJSON FeatureCollection must contain a LineString feature.",
+      );
     }
     return {
       type: "FeatureCollection",
@@ -1588,7 +2169,9 @@ function normalizeRouteGeojson(value, { preserveAllLineStrings = false } = {}) {
     };
   }
 
-  throw new Error("Unsupported GeoJSON type. Expected FeatureCollection, Feature, or LineString.");
+  throw new Error(
+    "Unsupported GeoJSON type. Expected FeatureCollection, Feature, or LineString.",
+  );
 }
 
 function handleExportRoute() {
@@ -1617,7 +2200,10 @@ async function handleCompareFilesSelected(event) {
   }
 
   if (compareRoutes.length + files.length > MAX_IMPORTED_ROUTES) {
-    setCompareBanner(`You can compare at most ${MAX_IMPORTED_ROUTES} GeoJSON routes at once.`, "warning");
+    setCompareBanner(
+      `You can compare at most ${MAX_IMPORTED_ROUTES} GeoJSON routes at once.`,
+      "warning",
+    );
     return;
   }
 
@@ -1626,7 +2212,7 @@ async function handleCompareFilesSelected(event) {
 
   try {
     const loadedRoutes = await Promise.all(
-      files.map(async (file) => {
+      files.map(async file => {
         const text = await file.text();
         let parsed;
         try {
@@ -1636,7 +2222,7 @@ async function handleCompareFilesSelected(event) {
         }
 
         return {
-          id: `compare-route-${compareRouteIdCounter += 1}`,
+          id: `compare-route-${(compareRouteIdCounter += 1)}`,
           name: file.name,
           geojson: normalizeRouteGeojson(parsed),
         };
@@ -1649,7 +2235,10 @@ async function handleCompareFilesSelected(event) {
       bannerMessage: `Loaded ${loadedRoutes.length} GeoJSON route${loadedRoutes.length === 1 ? "" : "s"} and recalculated them.`,
     });
   } catch (error) {
-    setCompareBanner(error instanceof Error ? error.message : String(error), "error");
+    setCompareBanner(
+      error instanceof Error ? error.message : String(error),
+      "error",
+    );
   } finally {
     elements.loadRouteFilesBtn.disabled = false;
   }
@@ -1670,14 +2259,17 @@ async function evaluateCompareRoutes({ bannerMessage = null } = {}) {
 
   elements.recalculateRoutesBtn.disabled = true;
   elements.clearRoutesBtn.disabled = true;
-  setCompareBanner("Evaluating imported GeoJSON routes against the active server weights…", "info");
+  setCompareBanner(
+    "Evaluating imported GeoJSON routes against the active server weights…",
+    "info",
+  );
 
   try {
     const response = await fetch("/evaluate_routes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        routes: compareRoutes.map((route) => ({
+        routes: compareRoutes.map(route => ({
           name: route.name,
           geojson: route.geojson,
         })),
@@ -1698,10 +2290,13 @@ async function evaluateCompareRoutes({ bannerMessage = null } = {}) {
     }
     setCompareBanner(
       bannerMessage || buildCompareBannerMessage(payload),
-      compareRoutes.some((route) => route.result?.error) ? "warning" : "success",
+      compareRoutes.some(route => route.result?.error) ? "warning" : "success",
     );
   } catch (error) {
-    setCompareBanner(error instanceof Error ? error.message : String(error), "error");
+    setCompareBanner(
+      error instanceof Error ? error.message : String(error),
+      "error",
+    );
     renderCompareState();
   } finally {
     elements.recalculateRoutesBtn.disabled = false;
@@ -1723,18 +2318,31 @@ function clearCompareRoutes() {
 
 function renderCompareState(payload = null) {
   ensureFocusSelections();
-  elements.compareViewAllBtn.classList.toggle("active", state.compareView !== "focus");
-  elements.compareViewFocusBtn.classList.toggle("active", state.compareView === "focus");
-  elements.compareFocusControls.classList.toggle("active", state.compareView === "focus");
-  elements.compareFocusSummary.classList.toggle("active", state.compareView === "focus");
+  elements.compareViewAllBtn.classList.toggle(
+    "active",
+    state.compareView !== "focus",
+  );
+  elements.compareViewFocusBtn.classList.toggle(
+    "active",
+    state.compareView === "focus",
+  );
+  elements.compareFocusControls.classList.toggle(
+    "active",
+    state.compareView === "focus",
+  );
+  elements.compareFocusSummary.classList.toggle(
+    "active",
+    state.compareView === "focus",
+  );
 
   renderCompareFocusControls();
   renderCompareFocusSummary();
 
   const routesToRender = getVisibleCompareRoutes();
-  const routeCountLabel = state.compareView === "focus" && compareRoutes.length > 0
-    ? `${routesToRender.length} focused / ${compareRoutes.length} loaded`
-    : `${compareRoutes.length} route${compareRoutes.length === 1 ? "" : "s"}`;
+  const routeCountLabel =
+    state.compareView === "focus" && compareRoutes.length > 0
+      ? `${routesToRender.length} focused / ${compareRoutes.length} loaded`
+      : `${compareRoutes.length} route${compareRoutes.length === 1 ? "" : "s"}`;
   elements.compareRouteCount.textContent = routeCountLabel;
   elements.recalculateRoutesBtn.disabled = compareRoutes.length === 0;
   elements.clearRoutesBtn.disabled = compareRoutes.length === 0;
@@ -1751,7 +2359,7 @@ function renderCompareState(payload = null) {
   elements.compareRouteList.className = "compare-route-list";
 
   elements.compareRouteList.innerHTML = routesToRender
-    .map((route) => {
+    .map(route => {
       const result = route.result ?? {};
       const error = typeof result.error === "string" ? result.error : null;
       const distanceText = formatDistance(result.distance_m);
@@ -1810,9 +2418,12 @@ function setCompareBanner(message, tone) {
 }
 
 function buildCompareBannerMessage(payload) {
-  const customized = payload?.using_customized_weights ? "customized" : "baseline";
+  const customized = payload?.using_customized_weights
+    ? "customized"
+    : "baseline";
   const graphType = formatGraphType(payload?.graph_type).toLowerCase();
-  const modeLabel = state.compareView === "focus" ? "focus 1-1 mode" : "all-routes mode";
+  const modeLabel =
+    state.compareView === "focus" ? "focus 1-1 mode" : "all-routes mode";
   return `Compared ${compareRoutes.length} route${compareRoutes.length === 1 ? "" : "s"} using the ${customized} weight profile on the ${graphType} in ${modeLabel}.`;
 }
 
@@ -1823,19 +2434,27 @@ function ensureFocusSelections() {
     return;
   }
 
-  if (!compareRoutes.some((route) => route.id === state.focusRouteAId)) {
+  if (!compareRoutes.some(route => route.id === state.focusRouteAId)) {
     state.focusRouteAId = compareRoutes[0]?.id ?? "";
   }
 
-  if (!compareRoutes.some((route) => route.id === state.focusRouteBId) || state.focusRouteBId === state.focusRouteAId) {
-    const fallbackRoute = compareRoutes.find((route) => route.id !== state.focusRouteAId);
+  if (
+    !compareRoutes.some(route => route.id === state.focusRouteBId) ||
+    state.focusRouteBId === state.focusRouteAId
+  ) {
+    const fallbackRoute = compareRoutes.find(
+      route => route.id !== state.focusRouteAId,
+    );
     state.focusRouteBId = fallbackRoute?.id ?? "";
   }
 }
 
 function renderCompareFocusControls() {
   const optionsMarkup = compareRoutes
-    .map((route) => `<option value="${escapeHtml(route.id)}">${escapeHtml(route.name)}</option>`)
+    .map(
+      route =>
+        `<option value="${escapeHtml(route.id)}">${escapeHtml(route.name)}</option>`,
+    )
     .join("");
 
   elements.compareFocusASelect.innerHTML = optionsMarkup;
@@ -1852,16 +2471,22 @@ function renderCompareFocusSummary() {
   }
 
   if (compareRoutes.length < 2) {
-    elements.compareFocusSummary.className = "compare-focus-summary active empty";
-    elements.compareFocusSummary.textContent = "Load at least two routes to use focus 1-1 comparison.";
+    elements.compareFocusSummary.className =
+      "compare-focus-summary active empty";
+    elements.compareFocusSummary.textContent =
+      "Load at least two routes to use focus 1-1 comparison.";
     return;
   }
 
-  const routeA = compareRoutes.find((route) => route.id === state.focusRouteAId) ?? null;
-  const routeB = compareRoutes.find((route) => route.id === state.focusRouteBId) ?? null;
+  const routeA =
+    compareRoutes.find(route => route.id === state.focusRouteAId) ?? null;
+  const routeB =
+    compareRoutes.find(route => route.id === state.focusRouteBId) ?? null;
   if (!routeA || !routeB) {
-    elements.compareFocusSummary.className = "compare-focus-summary active empty";
-    elements.compareFocusSummary.textContent = "Select two routes to focus the comparison.";
+    elements.compareFocusSummary.className =
+      "compare-focus-summary active empty";
+    elements.compareFocusSummary.textContent =
+      "Select two routes to focus the comparison.";
     return;
   }
 
@@ -1894,8 +2519,10 @@ function getVisibleCompareRoutes() {
     return compareRoutes;
   }
 
-  const focusedIds = new Set([state.focusRouteAId, state.focusRouteBId].filter(Boolean));
-  return compareRoutes.filter((route) => focusedIds.has(route.id));
+  const focusedIds = new Set(
+    [state.focusRouteAId, state.focusRouteBId].filter(Boolean),
+  );
+  return compareRoutes.filter(route => focusedIds.has(route.id));
 }
 
 function describePairWinner(routeA, routeB, field, formatter) {
@@ -1958,7 +2585,11 @@ async function fetchReadyStatus() {
     return payload;
   }
 
-  if (response.status === 503 && payload && typeof payload.ready === "boolean") {
+  if (
+    response.status === 503 &&
+    payload &&
+    typeof payload.ready === "boolean"
+  ) {
     return payload;
   }
 
@@ -1975,12 +2606,15 @@ function buildErrorMessage(payload) {
 
   if (details.reason === "out_of_bounds" && details.bbox) {
     return new Error(
-      `${message} Coverage lat ${details.bbox.min_lat.toFixed(4)} to ${details.bbox.max_lat.toFixed(4)}, `
-      + `lng ${details.bbox.min_lng.toFixed(4)} to ${details.bbox.max_lng.toFixed(4)}.`,
+      `${message} Coverage lat ${details.bbox.min_lat.toFixed(4)} to ${details.bbox.max_lat.toFixed(4)}, ` +
+        `lng ${details.bbox.min_lng.toFixed(4)} to ${details.bbox.max_lng.toFixed(4)}.`,
     );
   }
 
-  if (details.reason === "snap_too_far" && Number.isFinite(details.snap_distance_m)) {
+  if (
+    details.reason === "snap_too_far" &&
+    Number.isFinite(details.snap_distance_m)
+  ) {
     return new Error(
       `${message} Nearest road is about ${formatDistance(details.snap_distance_m)} away.`,
     );
@@ -2103,7 +2737,7 @@ function humanizeSnakeCase(value) {
   }
   return value
     .split("_")
-    .map((part) => capitalize(part))
+    .map(part => capitalize(part))
     .join(" ");
 }
 
@@ -2112,7 +2746,9 @@ function capitalize(value) {
 }
 
 function downloadJson(payload, fileName) {
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/geo+json;charset=utf-8" });
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/geo+json;charset=utf-8",
+  });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;

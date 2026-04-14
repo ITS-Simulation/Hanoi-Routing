@@ -35,6 +35,7 @@ affinity = "^0.1.2"
 scoped-tls = "^1.0.0"
 chrono = "^0.4.19"
 tracing = "^0.1"
+memmap2 = "^0.9"
 
 [build-dependencies]
 built = { version = "^0.5.1", features = ["git2", "chrono"] }
