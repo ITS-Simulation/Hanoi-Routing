@@ -1,4 +1,4 @@
-package com.thomas.cch_app
+package com.thomas.mvp
 
 import org.slf4j.LoggerFactory
 import kotlin.math.exp
@@ -6,6 +6,7 @@ import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.PI
+import kotlin.math.abs
 
 class WeightGenerator(
     private val inputs: GraphInputs,
@@ -167,7 +168,7 @@ class WeightGenerator(
         }
 
         fun circularHourDiff(hour: Double, center: Double): Double {
-            val raw = kotlin.math.abs(normalizeHour(hour) - normalizeHour(center))
+            val raw = abs(normalizeHour(hour) - normalizeHour(center))
             return min(raw, 24.0 - raw)
         }
 

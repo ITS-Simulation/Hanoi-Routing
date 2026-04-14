@@ -1,4 +1,4 @@
-package com.thomas.cch_app
+package com.thomas.mvp
 
 import org.apache.arrow.memory.RootAllocator
 import org.apache.arrow.vector.BitVector

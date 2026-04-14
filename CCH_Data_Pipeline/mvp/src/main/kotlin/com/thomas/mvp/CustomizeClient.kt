@@ -1,4 +1,4 @@
-package com.thomas.cch_app
+package com.thomas.mvp
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
@@ -9,6 +9,7 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 data class CustomizeResult(
     val statusCode: Int,
@@ -23,7 +24,7 @@ class CustomizeClient(serverBaseUrl: String) : AutoCloseable {
 
     suspend fun postWeights(weights: IntArray): CustomizeResult {
         val bodyBytes = ByteBuffer.allocate(weights.size * Int.SIZE_BYTES)
-            .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            .order(ByteOrder.LITTLE_ENDIAN)
             .apply {
                 for (weight in weights) {
                     putInt(weight)

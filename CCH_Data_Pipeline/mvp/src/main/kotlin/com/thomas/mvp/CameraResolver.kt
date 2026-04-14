@@ -1,4 +1,4 @@
-package com.thomas.cch_app
+package com.thomas.mvp
 
 import org.slf4j.LoggerFactory
 import java.util.Locale

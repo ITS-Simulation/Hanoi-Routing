@@ -1,4 +1,4 @@
-package com.thomas.cch_app
+package com.thomas.mvp
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.main
