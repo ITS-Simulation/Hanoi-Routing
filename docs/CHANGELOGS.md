@@ -1,5 +1,23 @@
 # CHANGELOGS.md
 
+## 2026-04-15 — Cập nhật tài liệu hướng dẫn theo source hiện tại
+
+- **`docs/Hướng dẫn sử dụng.md`**: Thêm mục 2 — Giao diện Route Viewer (UI):
+  khởi động `--serve-ui`, luồng query (single/multi), so sánh route GeoJSON,
+  đo khoảng cách, traffic/camera overlay, bản đồ nền, thông tin server & reset.
+  Renumber toàn bộ mục lục và sub-sections.
+- **`docs/Hướng dẫn đọc tài liệu và source.md`**: Cập nhật bảng module
+  hanoi-core (thêm bounds, spatial, multi_route, cch_cache, via_way_restriction),
+  bảng file hanoi-server (thêm handlers, engine, state, types, camera_overlay,
+  traffic, route_eval, ui), thêm diagnose_turn vào hanoi-tools, cập nhật mô tả
+  CCH_Data_Pipeline.
+- **`docs/Hướng dẫn sử dụng.md`**: Thêm endpoints mới (evaluate_routes,
+  reset_weights, traffic_overlay, camera_overlay, UI routes), thêm query params
+  alternatives/stretch, thêm trường graph_type vào response, thêm binary
+  diagnose_turn, sửa default ports (8080/9080), thêm mục 10 công cụ chẩn đoán.
+- **`docs/Hướng dẫn cài đặt triển khai.md`**: Thêm diagnose_turn vào binary
+  table, thêm --camera-config và --serve-ui vào server params.
+
 ## 2026-04-10 — implement proximity-first snapping and road-conforming connectors
 
 - **`CCH-Hanoi/crates/hanoi-core/src/line_graph.rs`** (updated): Replaced
