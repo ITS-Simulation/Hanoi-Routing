@@ -6,7 +6,7 @@ use crate::datastr::timestamped_vector::TimestampedVector;
 
 /// Default geographic stretch factor for filtering alternatives by geo distance.
 /// Loại tuyến thay thế nếu quãng đường địa lý vượt quá (ngắn nhất × stretch).
-pub const DEFAULT_STRETCH: f64 = 1.25;
+pub const DEFAULT_STRETCH: f64 = 1.3;
 
 /// Max ratio of shared cost between two routes before the candidate is rejected as too similar.
 /// Nếu hai tuyến trùng nhau quá ngưỡng chi phí này thì tuyến mới bị loại vì quá giống.

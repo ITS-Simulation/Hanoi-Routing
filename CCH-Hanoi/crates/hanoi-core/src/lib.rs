@@ -1,19 +1,14 @@
 // hanoi-core: Hanoi-specific CCH implementation and API surface.
 
-pub mod bounds;
-pub mod cch;
-mod cch_cache;
-pub mod geometry;
+pub mod geo;
 pub mod graph;
-pub mod line_graph;
-pub mod multi_route;
-pub mod spatial;
-pub mod via_way_restriction;
+pub mod guidance;
+pub mod restrictions;
+pub mod routing;
 
-// Re-export key types for ergonomic imports
-pub use bounds::{BoundingBox, CoordRejection, ValidationConfig};
-pub use cch::{CchContext, QueryAnswer, QueryEngine};
-pub use geometry::{TurnAnnotation, TurnDirection};
+pub use geo::{BoundingBox, CoordRejection, SnapResult, SpatialIndex, ValidationConfig};
 pub use graph::GraphData;
-pub use line_graph::{LineGraphCchContext, LineGraphQueryEngine};
-pub use spatial::{SnapResult, SpatialIndex};
+pub use guidance::{TurnAnnotation, TurnDirection};
+pub use routing::line_graph::{LineGraphCchContext, LineGraphQueryEngine};
+pub use routing::normal::{CchContext, QueryEngine};
+pub use routing::QueryAnswer;

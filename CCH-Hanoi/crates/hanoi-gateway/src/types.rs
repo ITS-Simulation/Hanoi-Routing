@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 /// URL query-string parameters for the gateway query endpoint.
-/// `profile` selects the backend; `format` and `colors` are forwarded to the backend.
+/// `profile` selects the backend; the remaining fields are forwarded to the backend.
 #[derive(Deserialize)]
 pub struct GatewayQueryParam {
     /// Routing profile name (e.g. "car", "motorcycle"). Must match a profile
@@ -9,10 +9,18 @@ pub struct GatewayQueryParam {
     pub profile: String,
     pub format: Option<String>,
     pub colors: Option<String>,
+    pub alternatives: Option<u32>,
+    pub stretch: Option<f64>,
 }
 
-/// Gateway info request — selects which backend to query by profile.
+/// Optional-profile gateway request for status-style endpoints.
 #[derive(Deserialize)]
 pub struct InfoQuery {
     pub profile: Option<String>,
+}
+
+/// Required-profile gateway request for backend operations.
+#[derive(Deserialize)]
+pub struct RequiredProfileQuery {
+    pub profile: String,
 }

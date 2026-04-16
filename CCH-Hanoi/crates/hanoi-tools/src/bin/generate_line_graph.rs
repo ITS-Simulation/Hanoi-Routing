@@ -1,4 +1,4 @@
-use hanoi_core::via_way_restriction::{apply_node_splits, load_via_way_chains};
+use hanoi_core::restrictions::via_way::{apply_node_splits, load_via_way_chains};
 use rust_road_router::{datastr::graph::*, io::*};
 use std::{
     error::Error,

@@ -141,7 +141,11 @@ async fn main() {
 
     let router = Router::new()
         .route("/query", post(proxy::handle_query))
+        .route("/reset_weights", post(proxy::handle_reset_weights))
         .route("/info", get(proxy::handle_info))
+        .route("/status", get(proxy::handle_info))
+        .route("/health", get(proxy::handle_health))
+        .route("/ready", get(proxy::handle_ready))
         .route("/profiles", get(proxy::handle_profiles))
         .layer(TraceLayer::new_for_http())
         .with_state(state);

@@ -115,6 +115,59 @@ rust_road_router/engine     (upstream — generic algorithms, NEVER modified)
    hanoi-gateway            (independent — HTTP proxy, no core dependency)
 ```
 
+### Refined Crate Internals
+
+`hanoi-core` is now organized by domain instead of keeping the whole crate flat
+under `src/`:
+
+```text
+hanoi-core/src/
+├── lib.rs
+├── graph/{mod.rs,data.rs,cache.rs}
+├── geo/
+│   ├── mod.rs
+│   ├── bounds.rs
+│   └── spatial/{mod.rs,index.rs,snap.rs,metric.rs}
+├── routing/
+│   ├── mod.rs
+│   ├── alternatives.rs
+│   ├── normal/{mod.rs,answer.rs,context.rs,engine.rs,snap.rs}
+│   └── line_graph/{mod.rs,context.rs,engine.rs,mapping.rs,coordinate_patch.rs}
+├── guidance/{mod.rs,turn_annotation.rs,turn_classify.rs,turn_refine.rs}
+└── restrictions/{mod.rs,via_way.rs}
+```
+
+`hanoi-server` now uses `lib.rs + thin main.rs`, with startup, API, runtime,
+and UI concerns separated into subtrees:
+
+```text
+hanoi-server/src/
+├── lib.rs
+├── main.rs
+├── app/{mod.rs,args.rs,tracing.rs,bootstrap.rs,routes.rs}
+├── api/
+│   ├── mod.rs
+│   ├── state.rs
+│   ├── dto/{mod.rs,query.rs,customize.rs,status.rs,ui.rs}
+│   └── handlers/{mod.rs,query.rs,customize.rs,status.rs,ui.rs}
+├── runtime/{mod.rs,worker.rs,dispatch.rs,response.rs}
+└── ui/
+    ├── mod.rs
+    ├── static_assets.rs
+    ├── traffic/{mod.rs,overlay.rs,road_flags.rs}
+    ├── camera/{mod.rs,loader.rs,overlay.rs}
+    └── route_eval/{mod.rs,parser.rs,normal.rs,line_graph.rs}
+```
+
+Canonical import paths after the refactor:
+
+- `hanoi_core::routing::normal::{CchContext, QueryAnswer, QueryEngine}`
+- `hanoi_core::routing::line_graph::{LineGraphCchContext, LineGraphQueryEngine}`
+- `hanoi_core::geo::spatial::{SpatialIndex, SnapResult, haversine_m}`
+- `hanoi_core::restrictions::via_way::{apply_node_splits, load_via_way_chains}`
+- `hanoi_server::app::bootstrap::run`
+- `hanoi_server::runtime::worker::{run_normal, run_line_graph}`
+
 ### Edition and Toolchain
 
 All crates use **Rust edition 2024** on **nightly** toolchain. Nightly is
@@ -135,8 +188,11 @@ cargo build --release --workspace
 ### Build Individual Crates
 
 ```bash
-# Server
+# Server (headless default build)
 cargo build --release -p hanoi-server
+
+# Server with bundled UI + overlay endpoints
+cargo build --release -p hanoi-server --features ui
 
 # Gateway
 cargo build --release -p hanoi-gateway
@@ -489,7 +545,27 @@ coordinates prepended/appended, so `coordinates.len() == path.len() + 2`.
 
 ### 6.1 Starting the Server
 
-**Normal mode**:
+`hanoi-server` now has two build profiles:
+
+- **Headless default build**: query/status API + `/reset_weights` on the query
+  port, plus `/customize` on the customize port.
+- **UI build** (`--features ui`): adds `/evaluate_routes`,
+  `/traffic_overlay`, `/camera_overlay`, and enables the optional bundled
+  route-viewer frontend.
+
+Build commands:
+
+```bash
+cd CCH-Hanoi
+
+# Headless default
+cargo build --release -p hanoi-server
+
+# UI-enabled build
+cargo build --release -p hanoi-server --features ui
+```
+
+**Normal mode (headless default)**:
 
 ```bash
 hanoi_server \
@@ -498,7 +574,7 @@ hanoi_server \
   --customize-port 9080
 ```
 
-**Line graph mode**:
+**Line graph mode (headless default)**:
 
 ```bash
 hanoi_server \
@@ -509,6 +585,20 @@ hanoi_server \
   --line-graph
 ```
 
+**UI build with bundled route-viewer**:
+
+```bash
+hanoi_server \
+  --graph-dir Maps/data/hanoi_car/graph \
+  --query-port 8080 \
+  --customize-port 9080 \
+  --serve-ui
+```
+
+In a default headless build, the CLI does **not** accept `--serve-ui` or
+`--camera-config`. Those flags are only available when the binary is built with
+`--features ui`.
+
 ### 6.2 CLI Arguments
 
 
@@ -516,8 +606,10 @@ hanoi_server \
 | ---------------------- | ---------- | ------------------------------------------------------- |
 | `--graph-dir`          | (required) | Path to graph directory                                 |
 | `--original-graph-dir` | (none)     | Required for `--line-graph` mode                        |
+| `--camera-config`      | `CCH_Data_Pipeline/config/mvp_camera.yaml` | Camera YAML path for the camera overlay (`--features ui` build only) |
 | `--query-port`         | `8080`     | Port for query/info/health/ready API                    |
 | `--customize-port`     | `9080`     | Port for weight upload API                              |
+| `--serve-ui`           | `false`    | Serve `/`, `/ui`, `/assets/*` from the query port (`--features ui` build only) |
 | `--line-graph`         | `false`    | Enable turn-expanded routing                            |
 | `--log-format`         | `pretty`   | Log format: `pretty`, `full`, `compact`, `tree`, `json` |
 | `--log-dir`            | (none)     | Directory for daily-rotated JSON log files              |
@@ -553,6 +645,14 @@ hanoi_server \
 customize port accepts raw binary weight vectors from the internal data pipeline.
 Separating them allows independent access control and body size limits (64 MB on
 customize, standard limits on query).
+
+**Query-port endpoint matrix**:
+
+- Default headless build: `/query`, `/reset_weights`, `/info`, `/health`,
+  `/ready`
+- `--features ui` build: adds `/evaluate_routes`, `/traffic_overlay`,
+  `/camera_overlay`
+- `--features ui` + `--serve-ui`: additionally mounts `/`, `/ui`, `/assets/*`
 
 ### 6.4 Engine Background Thread
 
@@ -715,9 +815,10 @@ jq 'select(.fields.message | contains("ready"))' /var/log/gw.json
 
 **What the gateway proxies**: `/query` (POST) and `/info` (GET) only.
 
-**What it does NOT proxy**: `/customize`, `/health`, `/ready`. Customization
-goes directly from the pipeline to each server's customize port. Health/ready
-checks are done by orchestration tools directly against each backend.
+**What it does NOT proxy**: `/customize`, `/reset_weights`, `/health`,
+`/ready`. Customization and baseline-reset operations go directly to each
+server's API ports. Health/ready checks are done by orchestration tools
+directly against each backend.
 
 ### 7.6 Error Propagation
 
@@ -1389,10 +1490,23 @@ Via gateway: `GET /info?profile=car`
 | Endpoint     | Method | Port      | Purpose             | Status Codes |
 | ------------ | ------ | --------- | ------------------- | ------------ |
 | `/query`     | POST   | Query     | Route query         | 200, 400     |
+| `/reset_weights` | POST | Query   | Re-queue baseline weights | 200, 503 |
 | `/info`      | GET    | Query     | Graph metadata      | 200          |
 | `/health`    | GET    | Query     | Operational metrics | 200          |
 | `/ready`     | GET    | Query     | Readiness probe     | 200, 503     |
 | `/customize` | POST   | Customize | Weight upload       | 200, 400     |
+
+**UI-only routes** — available only when `hanoi-server` is built with
+`--features ui`:
+
+| Endpoint            | Method | Port  | Purpose                          | Status Codes |
+| ------------------- | ------ | ----- | -------------------------------- | ------------ |
+| `/evaluate_routes`  | POST   | Query | Evaluate imported GeoJSON routes | 200, 400     |
+| `/traffic_overlay`  | GET    | Query | Viewport-filtered traffic overlay| 200, 400     |
+| `/camera_overlay`   | GET    | Query | Viewport-filtered camera overlay | 200, 400     |
+
+The static frontend routes `/`, `/ui`, and `/assets/*` are mounted only when a
+`--features ui` build is started with `--serve-ui`.
 
 
 ---
@@ -2415,14 +2529,15 @@ hanoi_server --log-format pretty --graph-dir Maps/data/hanoi_car/graph
 ```
 
 ```
-  2026-03-19T10:30:00.123456Z  INFO hanoi_core::cch: building CCH
-    at crates/hanoi-core/src/cch.rs:58
-    in hanoi_core::cch::load_and_build with graph_dir: Maps/data/hanoi_car/graph
+  2026-03-19T10:30:00.123456Z  INFO hanoi_core::routing::normal::context: preparing CCH
+    at crates/hanoi-core/src/routing/normal/context.rs:32
+    in hanoi_core::routing::normal::context::load_and_build with graph_dir: Maps/data/hanoi_car/graph
 
   2026-03-19T10:30:05.456789Z  INFO hanoi_server: server ready
     query_addr: 0.0.0.0:8080
     customize_addr: 0.0.0.0:9080
     mode: normal
+    ui_enabled: false
 ```
 
 **Characteristics**:
@@ -2442,13 +2557,13 @@ hanoi_server --log-format full --graph-dir Maps/data/hanoi_car/graph
 ```
 
 ```
-2026-03-19T10:30:00.123Z  INFO hanoi_core::cch: building CCH num_nodes=276372 num_edges=654787
-2026-03-19T10:30:05.456Z  INFO ThreadId(01) hanoi_server: server ready query_addr=0.0.0.0:8080
+2026-03-19T10:30:00.123Z  INFO hanoi_core::routing::normal::context: preparing CCH num_nodes=276372 num_edges=654787
+2026-03-19T10:30:05.456Z  INFO ThreadId(01) hanoi_server: server ready query_addr=0.0.0.0:8080 customize_addr=0.0.0.0:9080 mode=normal ui_enabled=false
 ```
 
 **Characteristics**:
 - Single-line per event
-- Shows target module (`hanoi_core::cch`)
+- Shows target module (`hanoi_core::routing::normal::context`)
 - Shows thread IDs
 - Compact field display (`key=value`)
 - Best for: production terminals, log tailing
@@ -2462,7 +2577,7 @@ hanoi_server --log-format compact --graph-dir Maps/data/hanoi_car/graph
 ```
 
 ```
-2026-03-19T10:30:00.123Z  INFO hanoi_core::cch: building CCH
+2026-03-19T10:30:00.123Z  INFO hanoi_core::routing::normal::context: preparing CCH
 2026-03-19T10:30:05.456Z  INFO hanoi_server: server ready
 ```
 
@@ -2482,10 +2597,10 @@ hanoi_server --log-format tree --graph-dir Maps/data/hanoi_car/graph
 ```
 
 ```
-hanoi_core::cch::load_and_build
+hanoi_core::routing::normal::context::load_and_build
   graph_dir: Maps/data/hanoi_car/graph
-  0ms  INFO building CCH
-  ┌ hanoi_core::cch::customize
+  0ms  INFO preparing CCH
+  ┌ hanoi_core::routing::normal::context::customize
   │ 150ms  INFO customization complete
   └
 5012ms  INFO hanoi_server: server ready
@@ -2512,8 +2627,8 @@ hanoi_server --log-format json --graph-dir Maps/data/hanoi_car/graph
 ```
 
 ```json
-{"timestamp":"2026-03-19T10:30:00.123456Z","level":"INFO","target":"hanoi_core::cch","fields":{"message":"building CCH","num_nodes":276372,"num_edges":654787},"spans":[{"name":"load_and_build","graph_dir":"Maps/data/hanoi_car/graph"}]}
-{"timestamp":"2026-03-19T10:30:05.456789Z","level":"INFO","target":"hanoi_server","fields":{"message":"server ready","query_addr":"0.0.0.0:8080","customize_addr":"0.0.0.0:9080","mode":"normal"}}
+{"timestamp":"2026-03-19T10:30:00.123456Z","level":"INFO","target":"hanoi_core::routing::normal::context","fields":{"message":"preparing CCH","num_nodes":276372,"num_edges":654787},"spans":[{"name":"load_and_build","graph_dir":"Maps/data/hanoi_car/graph"}]}
+{"timestamp":"2026-03-19T10:30:05.456789Z","level":"INFO","target":"hanoi_server","fields":{"message":"server ready","query_addr":"0.0.0.0:8080","customize_addr":"0.0.0.0:9080","mode":"normal","ui_enabled":false}}
 ```
 
 **Characteristics**:
@@ -2565,13 +2680,13 @@ RUST_LOG=warn,hanoi_server=info   # Warn globally, info for server crate
 RUST_LOG=info,tower_http=trace    # Info globally, trace for HTTP layer
 
 # Target-specific granularity
-RUST_LOG=hanoi_core::cch=trace              # Trace just the CCH module
-RUST_LOG=hanoi_core::spatial=debug          # Debug spatial indexing
-RUST_LOG=hanoi_server::engine=trace         # Trace engine thread
-RUST_LOG=hanoi_server::handlers=debug       # Debug HTTP handlers
+RUST_LOG=hanoi_core::routing::normal::context=trace    # Trace normal-graph CCH build/customize
+RUST_LOG=hanoi_core::geo::spatial::index=debug         # Debug spatial indexing
+RUST_LOG=hanoi_server::runtime::worker=trace           # Trace engine thread
+RUST_LOG=hanoi_server::api::handlers=debug             # Debug HTTP handlers
 
 # Combining multiple targets
-RUST_LOG="info,hanoi_core::cch=debug,hanoi_core::spatial=debug,tower_http=debug"
+RUST_LOG="info,hanoi_core::routing::normal::context=debug,hanoi_core::geo::spatial::index=debug,tower_http=debug"
 ```
 
 #### Common Recipes
@@ -2584,11 +2699,11 @@ RUST_LOG=debug hanoi_server --graph-dir Maps/data/hanoi_car/graph
 RUST_LOG=info hanoi_server --graph-dir Maps/data/hanoi_car/graph
 
 # Debug coordinate snapping issues
-RUST_LOG="info,hanoi_core::spatial=debug" cch-hanoi --log-format full \
+RUST_LOG="info,hanoi_core::geo::spatial::index=debug" cch-hanoi --log-format full \
   query --data-dir Maps/data/hanoi_car --from-lat 21.028 --from-lng 105.834 ...
 
 # Debug CCH customization performance
-RUST_LOG="info,hanoi_core::cch=trace,hanoi_server::engine=trace" \
+RUST_LOG="info,hanoi_core::routing::normal::context=trace,hanoi_server::runtime::worker=trace" \
   hanoi_server --log-format full --graph-dir Maps/data/hanoi_car/graph
 
 # Debug gateway proxy behavior
@@ -2598,7 +2713,7 @@ RUST_LOG="debug,hyper=info" hanoi_gateway --log-format full
 RUST_LOG=error hanoi_server --graph-dir Maps/data/hanoi_car/graph
 
 # Debug graph loading (data file I/O)
-RUST_LOG="info,hanoi_core::graph=debug" cch-hanoi query --data-dir Maps/data/hanoi_car ...
+RUST_LOG="info,hanoi_core::graph::data=debug" cch-hanoi query --data-dir Maps/data/hanoi_car ...
 ```
 
 ### 16.7 File-Based Logging (hanoi-server only)
@@ -2631,7 +2746,7 @@ filename is `hanoi-server.log.YYYY-MM-DD`.
 `tracing-appender::non_blocking`. The main application never blocks on file I/O.
 - **WorkerGuard lifetime** — the non-blocking writer returns a `WorkerGuard`
 that must be held for the lifetime of the program. Dropping it flushes and
-closes the writer. The server holds this guard in `main()`.
+closes the writer. The server holds this guard in `app::bootstrap::run()`.
 - **Dual output** — stderr and file layers run simultaneously. Both receive the
 same events (filtered by the same `RUST_LOG` / default filter).
 
@@ -2703,45 +2818,45 @@ levels:
 
 | Source Module              | Message                              | Fields                              | When                                |
 | -------------------------- | ------------------------------------ | ----------------------------------- | ----------------------------------- |
-| `hanoi_core::cch`          | building CCH                         | `num_nodes`, `num_edges`            | Phase 1 contraction start           |
-| `hanoi_core::line_graph`   | building DirectedCCH for line graph  | `num_nodes`, `num_edges`            | Line graph Phase 1 start            |
-| `hanoi_core::spatial`      | spatial index built                  | `bbox` (min/max lat/lng)            | KD-tree construction complete       |
-| `hanoi_server::engine`     | re-customizing                       | `num_weights`                       | Phase 2 customization start         |
-| `hanoi_server::engine`     | customization complete               | —                                   | Phase 2 customization end           |
-| `hanoi_server::engine`     | re-customizing line graph            | `num_weights`                       | Line graph Phase 2 start            |
-| `hanoi_server::engine`     | line graph customization complete    | —                                   | Line graph Phase 2 end              |
-| `hanoi_server::handlers`   | customization weights accepted       | —                                   | `/customize` validation passed      |
-| `hanoi_server`             | server ready                         | `query_addr`, `customize_addr`      | Both ports bound and serving        |
+| `hanoi_core::routing::normal::context`     | preparing CCH                        | `num_nodes`, `num_edges`            | Phase 1 normal-graph setup start    |
+| `hanoi_core::routing::line_graph::context` | preparing DirectedCCH for line graph | `num_nodes`, `num_edges`            | Phase 1 line-graph setup start      |
+| `hanoi_core::geo::spatial::index`          | bounding box computed                | `min_lat`, `max_lat`, `min_lng`, `max_lng` | Spatial index build setup    |
+| `hanoi_server::runtime::worker`            | re-customizing                       | `num_weights`                       | Phase 2 customization start         |
+| `hanoi_server::runtime::worker`            | customization complete               | —                                   | Phase 2 customization end           |
+| `hanoi_server::runtime::worker`            | re-customizing line graph            | `num_weights`                       | Line graph Phase 2 start            |
+| `hanoi_server::runtime::worker`            | line graph customization complete    | —                                   | Line graph Phase 2 end              |
+| `hanoi_server::api::handlers::customize`   | customization weights accepted, queued for engine thread | —                     | `/customize` validation passed      |
+| `hanoi_server::app::bootstrap`             | server ready                         | `query_addr`, `customize_addr`, `mode`, `ui_enabled` | Both ports bound and serving |
 
 #### Warning-Level Events
 
 | Source Module              | Message                              | Fields                              | When                                |
 | -------------------------- | ------------------------------------ | ----------------------------------- | ----------------------------------- |
-| `hanoi_server::handlers`   | coordinate validation failed         | `rejection`                         | Invalid coordinates in `/query`     |
+| `hanoi_server::api::handlers::query` | coordinate validation failed | `rejection`                         | Invalid coordinates in `/query`     |
 
 #### Debug-Level Events (require `RUST_LOG=debug` or module-specific)
 
 | Source Module              | Message                              | Fields                              | When                                |
 | -------------------------- | ------------------------------------ | ----------------------------------- | ----------------------------------- |
-| `hanoi_core::graph`        | loading graph data from disk         | `dir`                               | GraphData::load() start             |
-| `hanoi_core::graph`        | graph data loaded                    | `num_nodes`, `num_edges`            | GraphData::load() complete          |
+| `hanoi_core::graph::data`  | loading graph data from disk         | `dir`                               | GraphData::load() start             |
+| `hanoi_core::graph::data`  | graph data loaded                    | `num_nodes`, `num_edges`            | GraphData::load() complete          |
 
 #### Instrumented Spans (for timing and nesting)
 
 | Source Module              | Span Name            | Fields                              | What it wraps                       |
 | -------------------------- | -------------------- | ----------------------------------- | ----------------------------------- |
-| `hanoi_core::cch`          | `load_and_build`     | `graph_dir`                         | Full Phase 1 pipeline               |
-| `hanoi_core::cch`          | `customize`          | —                                   | Phase 2 customization               |
-| `hanoi_core::cch`          | `customize_with`     | `num_weights`                       | Phase 2 with custom weights         |
-| `hanoi_core::cch`          | `query`              | `from`, `to`                        | Single CCH query                    |
-| `hanoi_core::cch`          | `query_coords`       | `from`, `to`                        | Coordinate-based query              |
-| `hanoi_core::line_graph`   | `load_and_build`     | `line_graph_dir`, `original_graph_dir` | Line graph Phase 1                |
-| `hanoi_core::line_graph`   | `customize`          | —                                   | Line graph Phase 2                  |
-| `hanoi_core::line_graph`   | `customize_with`     | `num_weights`                       | Line graph Phase 2 with custom weights |
-| `hanoi_core::spatial`      | `build`              | `num_nodes`                         | KD-tree construction                |
-| `hanoi_core::spatial`      | `snap_to_edge`       | `lat`, `lng`                        | Single snap-to-edge operation       |
-| `hanoi_core::spatial`      | `validated_snap`     | `label`, `lat`, `lng`               | Snap with bbox/distance validation  |
-| `hanoi_server::engine`     | `customization`      | `num_weights`                       | Engine thread customization block   |
+| `hanoi_core::routing::normal::context`     | `load_and_build`     | `graph_dir`                         | Full normal-graph Phase 1 pipeline  |
+| `hanoi_core::routing::normal::context`     | `customize`          | —                                   | Normal-graph Phase 2 customization  |
+| `hanoi_core::routing::normal::context`     | `customize_with`     | `num_weights`                       | Normal-graph Phase 2 with custom weights |
+| `hanoi_core::routing::normal::engine`      | `query`              | `from`, `to`                        | Single CCH query                    |
+| `hanoi_core::routing::normal::engine`      | `query_coords`       | `from`, `to`                        | Coordinate-based query              |
+| `hanoi_core::routing::line_graph::context` | `load_and_build`     | `line_graph_dir`, `original_graph_dir` | Full line-graph Phase 1 pipeline |
+| `hanoi_core::routing::line_graph::context` | `customize`          | —                                   | Line graph Phase 2                  |
+| `hanoi_core::routing::line_graph::context` | `customize_with`     | `num_weights`                       | Line graph Phase 2 with custom weights |
+| `hanoi_core::geo::spatial::index`          | `build`              | `num_nodes`                         | KD-tree construction                |
+| `hanoi_core::geo::spatial::index`          | `snap_to_edge`       | `lat`, `lng`                        | Single snap-to-edge operation       |
+| `hanoi_core::geo::spatial::index`          | `validated_snap`     | `label`, `lat`, `lng`               | Snap with bbox/distance validation  |
+| `hanoi_server::runtime::worker`            | `customization`      | `num_weights`                       | Engine thread customization block   |
 
 ### 16.10 Disabling ANSI Colors
 
@@ -2763,7 +2878,7 @@ hanoi_server --log-format json --graph-dir Maps/data/hanoi_car/graph
 
 ```bash
 # Pretty output, debug level for your area of interest
-RUST_LOG="info,hanoi_core::cch=debug" hanoi_server \
+RUST_LOG="info,hanoi_core::routing::normal::context=debug" hanoi_server \
   --log-format pretty \
   --graph-dir Maps/data/hanoi_car/graph
 ```

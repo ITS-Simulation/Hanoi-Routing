@@ -51,7 +51,7 @@ pub struct GatewayConfig {
     /// Optional path to also write logs in JSON format.
     pub log_file: Option<String>,
 
-    /// Map of profile name → backend configuration. At least one entry required.
+    /// Map of profile name → backend configuration. At least one entry is required.
     pub profiles: HashMap<String, ProfileConfig>,
 }
 

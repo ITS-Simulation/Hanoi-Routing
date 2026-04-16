@@ -4,4 +4,4 @@ plugins {
 }
 
 rootProject.name = "CCH_Data_Pipeline"
-include("app", "modeler", "smoother", "simulation")
+include("app", "modeler", "smoother", "mvp")
